@@ -6,6 +6,8 @@ from flask import Flask
 import threading
 from supabase import create_client, Client
 from dotenv import load_dotenv
+import asyncio
+import datetime
 
 # ==============================
 # CARGAR VARIABLES DEL ENTORNO
@@ -27,6 +29,19 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Tiempo de inicio del bot
+start_time = datetime.datetime.utcnow()
+
+# IDs de emojis personalizados (usa los tuyos)
+EMOJI_DRAGON = "<a:Dragons:1432844923505344622>"
+EMOJI_FIRE = "<a:Fire:1432845262816284703>"
+EMOJI_BOT = "<:Bot:1432860900330700882>"
+EMOJI_PLANET = "<a:Planet:1432860542183407698>"
+EMOJI_TIME = "<a:Tiempo:1432861111929016431>"
+EMOJI_MOD = "<a:Moderador:1432860636823556247>"
+EMOJI_BAN = "<a:Ban:1432860427850612916>"
+EMOJI_WEA = "<a:wea:1432861954749370510>"
 
 # ==============================
 # EVENTO DE INICIO
@@ -105,6 +120,41 @@ async def on_member_join(member):
 
     except Exception as e:
         print(f"❌ Error en on_member_join: {e}")
+
+# ==============================
+# COMANDO /BOTSTATISTICS
+# ==============================
+@bot.tree.command(name="botstatistics", description="📊 Muestra las estadísticas globales del bot Dragons")
+async def bot_statistics(interaction: discord.Interaction):
+    # Datos de ejemplo (puedes conectarlos a base de datos si quieres)
+    globally_banned_users = 7
+    total_global_users = 1293
+    total_global_servers = len(bot.guilds)
+
+    # Calcular tiempo activo
+    uptime = datetime.datetime.utcnow() - start_time
+    days, remainder = divmod(int(uptime.total_seconds()), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+
+    # Crear embed
+    embed = discord.Embed(
+        title=f"{EMOJI_WEA} **[ DV ] Dragons Statistics** {EMOJI_WEA}",
+        description=f"{EMOJI_BOT} **Estadísticas globales del bot**",
+        color=discord.Color.purple()
+    )
+
+    embed.add_field(name=f"{EMOJI_BAN}  Globally Banned Users", value=f"**{globally_banned_users}**", inline=True)
+    embed.add_field(name=f"{EMOJI_PLANET}  Total Global Users", value=f"**{total_global_users}**", inline=True)
+    embed.add_field(name=f"{EMOJI_MOD}  Total Global Servers", value=f"**{total_global_servers}**", inline=True)
+    embed.add_field(name=f"{EMOJI_TIME}  Living Time", value=f"**{uptime_str}**", inline=False)
+
+    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")  # Dragons emoji
+    embed.set_footer(text="⚙️ Powered by Dragons Development", icon_url="https://cdn.discordapp.com/emojis/1432855375165526036.webp")
+
+    await interaction.response.send_message(embed=embed)
 
 # ==============================
 # MINI SERVIDOR FLASK PARA RENDER
