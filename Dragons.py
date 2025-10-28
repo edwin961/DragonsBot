@@ -34,14 +34,16 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 start_time = datetime.datetime.utcnow()
 
 # IDs de emojis personalizados (usa los tuyos)
-EMOJI_DRAGON = "<a:Dragons:1432844923505344622>"
-EMOJI_FIRE = "<a:Fire:1432845262816284703>"
-EMOJI_BOT = "<:Bot:1432860900330700882>"
-EMOJI_PLANET = "<a:Planet:1432860542183407698>"
-EMOJI_TIME = "<a:Tiempo:1432861111929016431>"
-EMOJI_MOD = "<a:Moderador:1432860636823556247>"
-EMOJI_BAN = "<a:Ban:1432860427850612916>"
-EMOJI_WEA = "<a:wea:1432861954749370510>"
+EMOJI_DRAGON = "<a:Dragons:1432855339732177067>"
+EMOJI_DERECHA = "<a:Derecha:1432857806754545685>"
+EMOJI_IZQUIERDA = "<a:Izquierdo:1432857641029206086>"
+EMOJI_FIRE = "<a:Fire:1432855375165526036>"
+EMOJI_BOT = "<:Bot:1432856165234114702>"
+EMOJI_PLANET = "<a:Planet:1432856726087925913>"
+EMOJI_TIME = "<a:Time:1432856512660766770>"
+EMOJI_MOD = "<a:Moderador:1432856982414561290>"
+EMOJI_BAN = "<a:Ban:1432857189092950169>"
+EMOJI_WEA = "<a:wea:1432863710635884604>"
 
 # ==============================
 # EVENTO DE INICIO
@@ -141,7 +143,7 @@ async def bot_statistics(interaction: discord.Interaction):
 
     # Crear embed
     embed = discord.Embed(
-        title=f"{EMOJI_WEA} **[ DV ] Dragons Statistics** {EMOJI_WEA}",
+        title=f"{EMOJI_DERECHA} **[ DV ] Dragons Statistics** {EMOJI_IZQUIERDA}",
         description=f"{EMOJI_BOT} **Estadísticas globales del bot**",
         color=discord.Color.purple()
     )
