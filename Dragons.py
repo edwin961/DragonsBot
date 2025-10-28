@@ -6,7 +6,6 @@ from flask import Flask
 import threading
 from supabase import create_client, Client
 from dotenv import load_dotenv
-import asyncio
 import datetime
 
 # ==============================
@@ -30,10 +29,11 @@ intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Tiempo de inicio del bot
 start_time = datetime.datetime.utcnow()
 
-# IDs de emojis personalizados (usa los tuyos)
+# ==============================
+# EMOJIS PERSONALIZADOS
+# ==============================
 EMOJI_DRAGON = "<a:Dragons:1432855339732177067>"
 EMOJI_DERECHA = "<a:Derecha:1432857806754545685>"
 EMOJI_IZQUIERDA = "<a:Izquierdo:1432857641029206086>"
@@ -43,7 +43,54 @@ EMOJI_PLANET = "<a:Planet:1432856726087925913>"
 EMOJI_TIME = "<a:Time:1432856512660766770>"
 EMOJI_MOD = "<a:Moderador:1432856982414561290>"
 EMOJI_BAN = "<a:Ban:1432857189092950169>"
-EMOJI_WEA = "<a:wea:1432863710635884604>"
+
+# ==============================
+# EVENTOS DE REGISTRO AUTOMÁTICO
+# ==============================
+@bot.event
+async def on_guild_join(guild):
+    """Registrar servidor cuando el bot entra"""
+    try:
+        supabase.table("servers").upsert({
+            "guild_id": str(guild.id),
+            "guild_name": guild.name,
+            "joined_at": datetime.datetime.utcnow().isoformat()
+        }).execute()
+        print(f"✅ Servidor registrado: {guild.name}")
+    except Exception as e:
+        print(f"❌ Error registrando servidor: {e}")
+
+@bot.event
+async def on_member_join(member):
+    """Enviar bienvenida y registrar usuario"""
+    try:
+        # Registrar usuario en Supabase
+        supabase.table("usuarios").upsert({
+            "user_id": str(member.id),
+            "username": member.name,
+            "joined_at": datetime.datetime.utcnow().isoformat()
+        }).execute()
+
+        # Buscar configuración de bienvenida
+        guild_id = str(member.guild.id)
+        data = supabase.table("bienvenidas").select("*").eq("guild_id", guild_id).execute()
+
+        if data.data:
+            config = data.data[0]
+            canal = member.guild.get_channel(int(config["canal_id"]))
+            if canal:
+                embed = discord.Embed(
+                    title=config["encabezado"],
+                    description=config["texto"].replace("{usuario}", member.mention),
+                    color=discord.Color.dark_red()
+                )
+                embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+                embed.set_image(url=config["gif"])
+                embed.set_footer(text="🐲 Dragons | Bienvenido al fuego eterno")
+                await canal.send(embed=embed)
+
+    except Exception as e:
+        print(f"❌ Error en on_member_join: {e}")
 
 # ==============================
 # EVENTO DE INICIO
@@ -70,7 +117,6 @@ async def on_ready():
 async def crear_bienvenida(interaction: discord.Interaction, canal: discord.TextChannel, encabezado: str, texto: str, gif: str):
     guild_id = str(interaction.guild.id)
 
-    # Guardar en la base de datos Supabase
     try:
         supabase.table("bienvenidas").upsert({
             "guild_id": guild_id,
@@ -93,70 +139,62 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
         await interaction.response.send_message(f"❌ Error al guardar la configuración: {e}", ephemeral=True)
 
 # ==============================
-# EVENTO DE ENTRADA DE USUARIOS
+# COMANDO /BAN
 # ==============================
-@bot.event
-async def on_member_join(member):
+@bot.tree.command(name="ban", description="Banea a un usuario y lo guarda en la base de datos.")
+@app_commands.describe(usuario="Usuario a banear", motivo="Motivo del baneo")
+async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo: str):
     try:
-        guild_id = str(member.guild.id)
-        data = supabase.table("bienvenidas").select("*").eq("guild_id", guild_id).execute()
-
-        if not data.data:
-            return  # No hay configuración en este servidor
-
-        config = data.data[0]
-        canal = member.guild.get_channel(int(config["canal_id"]))
-        if not canal:
-            return
+        await usuario.ban(reason=motivo)
+        supabase.table("baneados").insert({
+            "user_id": str(usuario.id),
+            "username": usuario.name,
+            "reason": motivo,
+            "banned_at": datetime.datetime.utcnow().isoformat()
+        }).execute()
 
         embed = discord.Embed(
-            title=config["encabezado"],
-            description=config["texto"].replace("{usuario}", member.mention),
-            color=discord.Color.dark_red()
+            title=f"{EMOJI_BAN} Usuario Baneado",
+            description=f"**{usuario.mention}** ha sido baneado.\n📝 Motivo: **{motivo}**",
+            color=discord.Color.red()
         )
-        embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-        embed.set_image(url=config["gif"])
-        embed.set_footer(text="🐲 Dragons | Bienvenido al fuego eterno")
-
-        await canal.send(embed=embed)
-
+        await interaction.response.send_message(embed=embed)
     except Exception as e:
-        print(f"❌ Error en on_member_join: {e}")
+        await interaction.response.send_message(f"❌ Error al banear: {e}", ephemeral=True)
 
 # ==============================
 # COMANDO /BOTSTATISTICS
 # ==============================
 @bot.tree.command(name="botstatistics", description="📊 Muestra las estadísticas globales del bot Dragons")
 async def bot_statistics(interaction: discord.Interaction):
-    # Datos de ejemplo (puedes conectarlos a base de datos si quieres)
-    globally_banned_users = 7
-    total_global_users = 1293
-    total_global_servers = len(bot.guilds)
+    try:
+        total_baneados = len(supabase.table("baneados").select("id").execute().data)
+        total_usuarios = len(supabase.table("usuarios").select("id").execute().data)
+        total_servers = len(supabase.table("servers").select("id").execute().data)
 
-    # Calcular tiempo activo
-    uptime = datetime.datetime.utcnow() - start_time
-    days, remainder = divmod(int(uptime.total_seconds()), 86400)
-    hours, remainder = divmod(remainder, 3600)
-    minutes, seconds = divmod(remainder, 60)
+        uptime = datetime.datetime.utcnow() - start_time
+        days, remainder = divmod(int(uptime.total_seconds()), 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
 
-    uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+        embed = discord.Embed(
+            title=f"{EMOJI_DERECHA} **[ DV ] Dragons Statistics** {EMOJI_IZQUIERDA}",
+            description=f"{EMOJI_BOT} **Estadísticas en tiempo real**",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name=f"{EMOJI_BAN}  Usuarios Baneados", value=f"**{total_baneados}**", inline=True)
+        embed.add_field(name=f"{EMOJI_PLANET}  Usuarios Globales", value=f"**{total_usuarios}**", inline=True)
+        embed.add_field(name=f"{EMOJI_MOD}  Servidores Activos", value=f"**{total_servers}**", inline=True)
+        embed.add_field(name=f"{EMOJI_TIME}  Tiempo Activo", value=f"**{uptime_str}**", inline=False)
 
-    # Crear embed
-    embed = discord.Embed(
-        title=f"{EMOJI_DERECHA} **[ DV ] Dragons Statistics** {EMOJI_IZQUIERDA}",
-        description=f"{EMOJI_BOT} **Estadísticas globales del bot**",
-        color=discord.Color.purple()
-    )
+        embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")
+        embed.set_footer(text="⚙️ Powered by Dragons Development", icon_url="https://cdn.discordapp.com/emojis/1432855375165526036.webp")
 
-    embed.add_field(name=f"{EMOJI_BAN}  Globally Banned Users", value=f"**{globally_banned_users}**", inline=True)
-    embed.add_field(name=f"{EMOJI_PLANET}  Total Global Users", value=f"**{total_global_users}**", inline=True)
-    embed.add_field(name=f"{EMOJI_MOD}  Total Global Servers", value=f"**{total_global_servers}**", inline=True)
-    embed.add_field(name=f"{EMOJI_TIME}  Living Time", value=f"**{uptime_str}**", inline=False)
+        await interaction.response.send_message(embed=embed)
 
-    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")  # Dragons emoji
-    embed.set_footer(text="⚙️ Powered by Dragons Development", icon_url="https://cdn.discordapp.com/emojis/1432855375165526036.webp")
-
-    await interaction.response.send_message(embed=embed)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al obtener estadísticas: {e}", ephemeral=True)
 
 # ==============================
 # MINI SERVIDOR FLASK PARA RENDER
