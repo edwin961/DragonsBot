@@ -111,7 +111,7 @@ async def on_ready():
 # ==============================
 # COMANDO /CREAR-BIENVENIDA
 # ==============================
-@bot.tree.command(name="Crear_Bienvenida", description="Crea una bienvenida personalizada para este servidor.")
+@bot.tree.command(name="crear_Bienvenida", description="Crea una bienvenida personalizada para este servidor.")
 @app_commands.describe(
     canal="Canal donde se enviará la bienvenida.",
     encabezado="Título del mensaje.",
@@ -145,7 +145,7 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
 # ==============================
 # COMANDO /BAN (solo administradores)
 # ==============================
-@bot.tree.command(name="Ban", description="Banea a un usuario y lo guarda en la base de datos (solo admins).")
+@bot.tree.command(name="ban", description="Banea a un usuario y lo guarda en la base de datos (solo admins).")
 @app_commands.describe(usuario="Usuario a banear", motivo="Motivo del baneo")
 async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo: str):
     # 🔒 Verificación de permisos
@@ -191,7 +191,7 @@ async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo:
 # COMANDO /ELIMINAR BAN (solo administradores)
 # ==============================
 
-@bot.tree.command(name="Unban", description="Desbanea a un usuario (solo administradores).")
+@bot.tree.command(name="unban", description="Desbanea a un usuario (solo administradores).")
 @app_commands.describe(usuario="ID del usuario que deseas desbanear")
 @app_commands.checks.has_permissions(administrator=True)
 async def eliminar_ban(interaction: discord.Interaction, usuario: str):
@@ -306,7 +306,7 @@ async def ver_warns(interaction: discord.Interaction, usuario: discord.Member):
 # ==============================
 # COMANDO /ELIMINAR-WARN (solo administradores)
 # ==============================
-@bot.tree.command(name="UnWarns", description="Elimina una advertencia específica o todas las de un usuario (solo admins).")
+@bot.tree.command(name="unWarns", description="Elimina una advertencia específica o todas las de un usuario (solo admins).")
 @app_commands.describe(
     usuario="Usuario del que deseas eliminar advertencias",
     warn_id="ID de la advertencia a eliminar (déjalo vacío para eliminar todas)"
@@ -391,7 +391,7 @@ async def bot_statistics(interaction: discord.Interaction):
 # COMANDO /MUTE (solo administradores)
 # ==============================
 
-@bot.tree.command(name="Mute", description="Silencia a un usuario temporalmente (solo administradores).")
+@bot.tree.command(name="mute", description="Silencia a un usuario temporalmente (solo administradores).")
 @app_commands.describe(
     usuario="Usuario que será silenciado",
     minutos="Duración del silencio en minutos",
@@ -452,7 +452,7 @@ async def mute(interaction: discord.Interaction, usuario: discord.Member, minuto
 # COMANDO /MUTE (solo administradores)
 # ==============================
 
-@bot.tree.command(name="Unmute", description="Quita el silencio de un usuario (solo administradores).")
+@bot.tree.command(name="unmute", description="Quita el silencio de un usuario (solo administradores).")
 @app_commands.describe(
     usuario="Usuario al que se le quitará el silencio",
     motivo="Motivo para quitar el mute"
@@ -508,7 +508,7 @@ async def unmute(interaction: discord.Interaction, usuario: discord.Member, moti
 # COMANDO /PERFIL (solo administradores)
 # ==============================
 
-@bot.tree.command(name="UserInfo", description="Muestra tu perfil o el de otro usuario.")
+@bot.tree.command(name="userInfo", description="Muestra tu perfil o el de otro usuario.")
 @app_commands.describe(usuario="Usuario a consultar (opcional)")
 async def perfil(interaction: discord.Interaction, usuario: discord.Member = None):
     import datetime
