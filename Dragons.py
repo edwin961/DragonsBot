@@ -132,7 +132,7 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
         embed = discord.Embed(
             title=f"{EMOJI_DRAGON} **[ DV ] Dragons Statistics**",
             description=f"**Canal:** {canal.mention}\n**Encabezado:** {encabezado}\n**Texto:** {texto}\n**GIF:** [Ver imagen]({gif})",
-            color=discord.Color.green()
+            color=discord.Color.blue()
         )
         embed.set_image(url=gif)
         embed.set_footer(text="Sistema de Bienvenida • Dragons")
@@ -142,11 +142,19 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
         await interaction.response.send_message(f"❌ Error al guardar la configuración: {e}", ephemeral=True)
 
 # ==============================
-# COMANDO /BAN
+# COMANDO /BAN (solo administradores)
 # ==============================
-@bot.tree.command(name="ban", description="Banea a un usuario y lo guarda en la base de datos.")
+@bot.tree.command(name="ban", description="Banea a un usuario y lo guarda en la base de datos (solo admins).")
 @app_commands.describe(usuario="Usuario a banear", motivo="Motivo del baneo")
 async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo: str):
+    # 🔒 Verificación de permisos
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "🚫 No tienes permiso para usar este comando. Solo administradores pueden banear.",
+            ephemeral=True
+        )
+        return
+
     try:
         await usuario.ban(reason=motivo)
         supabase.table("baneados").insert({
@@ -161,18 +169,40 @@ async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo:
             description=f"**{usuario.mention}** ha sido baneado.\n{EMOJI_NOTES} Motivo: **{motivo}**",
             color=discord.Color.red()
         )
+        embed.set_footer(text="Sistema de Moderación • Dragons")
         await interaction.response.send_message(embed=embed)
+
+        # DM opcional al usuario baneado
+        try:
+            dm_embed = discord.Embed(
+                title=f"{EMOJI_ALERT} Has sido baneado de {interaction.guild.name}",
+                description=f"**Motivo:** {motivo}",
+                color=discord.Color.blue()
+            )
+            await usuario.send(embed=dm_embed)
+        except:
+            pass
+
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al banear: {e}", ephemeral=True)
+
 
 # ==============================
 # COMANDO /WARN
 # ==============================
-@bot.tree.command(name="warn", description="Advierte a un usuario y guarda la advertencia en Supabase.")
+@bot.tree.command(name="warn", description="Advierte a un usuario y guarda la advertencia en Supabase (solo admins).")
 @app_commands.describe(usuario="Usuario a advertir", motivo="Motivo de la advertencia")
 async def warn(interaction: discord.Interaction, usuario: discord.Member, motivo: str):
+    # 🔒 Verificación de permisos
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "No tienes permiso para usar este comando. Solo administradores pueden advertir.",
+            ephemeral=True
+        )
+        return
+
     try:
-        # Insertar advertencia en Supabase
+        # Guardar advertencia en Supabase
         supabase.table("warns").insert({
             "user_id": str(usuario.id),
             "username": usuario.name,
@@ -180,26 +210,34 @@ async def warn(interaction: discord.Interaction, usuario: discord.Member, motivo
             "warned_by": interaction.user.name
         }).execute()
 
+        # Crear embed de confirmación
         embed = discord.Embed(
-            title=f"{EMOJI_WARNS} Usuario Advertido",
-            description=f"{EMOJI_NOTES} **Usuario:** {usuario.mention}\n{EMOJI_FIRE} **Motivo:** {motivo}\n{EMOJI_BOT} **Moderador:** {interaction.user.mention}",
-            color=discord.Color.orange()
+            title=f"{EMOJI_ALERT} Usuario Advertido",
+            description=(
+                f"{EMOJI_NOTES} **Usuario:** {usuario.mention}\n"
+                f"{EMOJI_FIRE} **Motivo:** {motivo}\n"
+                f"{EMOJI_BOT} **Moderador:** {interaction.user.mention}"
+            ),
+            color=discord.Color.blue()
         )
+        embed.set_footer(text="Sistema de Advertencias • Dragons")
         await interaction.response.send_message(embed=embed)
 
-        # Enviar DM al usuario advertido
+        # Intentar enviar DM al usuario advertido
         try:
             dm_embed = discord.Embed(
-                title=f" {EMOJI_ALERT}⚠️ Has sido advertido en {interaction.guild.name}",
+                title=f"{EMOJI_ALERT} Has sido advertido en {interaction.guild.name}",
                 description=f"**Motivo:** {motivo}\n**Moderador:** {interaction.user.name}",
-                color=discord.Color.orange()
+                color=discord.Color.blue()
             )
+            dm_embed.set_footer(text="Sistema de Advertencias • Dragons")
             await usuario.send(embed=dm_embed)
         except:
-            pass
+            pass  # si el usuario tiene los DMs cerrados, ignorar el error
 
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al registrar la advertencia: {e}", ephemeral=True)
+
 
 
 # ==============================
@@ -217,7 +255,7 @@ async def ver_warns(interaction: discord.Interaction, usuario: discord.Member):
 
         embed = discord.Embed(
             title=f"{EMOJI_NOTES} Advertencias de {usuario.name}",
-            color=discord.Color.gold()
+            color=discord.Color.blue()
         )
 
         for warn in data.data:
@@ -233,6 +271,56 @@ async def ver_warns(interaction: discord.Interaction, usuario: discord.Member):
 
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al obtener advertencias: {e}", ephemeral=True)
+
+# ==============================
+# COMANDO /ELIMINAR-WARN (solo administradores)
+# ==============================
+@bot.tree.command(name="eliminar-warn", description="Elimina una advertencia específica o todas las de un usuario (solo admins).")
+@app_commands.describe(
+    usuario="Usuario del que deseas eliminar advertencias",
+    warn_id="ID de la advertencia a eliminar (déjalo vacío para eliminar todas)"
+)
+async def eliminar_warn(interaction: discord.Interaction, usuario: discord.Member, warn_id: int = None):
+    # 🔒 Verificación de permisos
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "🚫 No tienes permiso para usar este comando. Solo administradores pueden eliminar advertencias.",
+            ephemeral=True
+        )
+        return
+
+    try:
+        if warn_id:
+            # Eliminar una advertencia específica
+            response = supabase.table("warns").delete().eq("id", warn_id).eq("user_id", str(usuario.id)).execute()
+
+            if response.data:
+                embed = discord.Embed(
+                    title=f"{EMOJI_ALERT} Advertencia Eliminada",
+                    description=f"⚙️ Se eliminó la advertencia con ID **{warn_id}** del usuario {usuario.mention}.",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Sistema de Advertencias • Dragons")
+                await interaction.response.send_message(embed=embed)
+            else:
+                await interaction.response.send_message(f"❌ No se encontró una advertencia con ID {warn_id} para {usuario.mention}.", ephemeral=True)
+
+        else:
+            # Eliminar todas las advertencias de un usuario
+            response = supabase.table("warns").delete().eq("user_id", str(usuario.id)).execute()
+            total = len(response.data)
+
+            embed = discord.Embed(
+                title=f"{EMOJI_FIRE} Advertencias Eliminadas",
+                description=f"{EMOJI_DRAGON} Se eliminaron **{total}** advertencias de {usuario.mention}.",
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="Sistema de Advertencias • Dragons")
+            await interaction.response.send_message(embed=embed)
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al eliminar advertencias: {e}", ephemeral=True)
+
 
 # ==============================
 # COMANDO /BOTSTATISTICS
