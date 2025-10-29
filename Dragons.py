@@ -43,6 +43,9 @@ EMOJI_PLANET = "<a:Planet:1432856726087925913>"
 EMOJI_TIME = "<a:Time:1432856512660766770>"
 EMOJI_MOD = "<a:Moderador:1432856982414561290>"
 EMOJI_BAN = "<a:Ban:1432857189092950169>"
+EMOJI_NOTES = "<a:Notas:1432881765000937483>"
+EMOJI_ALERT = "<a:Alerta:1432884129044893748>"
+EMOJI_WARNS = "<a:Warns:1432883811007467682>"
 
 # ==============================
 # EVENTOS DE REGISTRO AUTOMÁTICO
@@ -127,7 +130,7 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
         }).execute()
 
         embed = discord.Embed(
-            title="🐲 ¡Bienvenida configurada con éxito!",
+            title=f"{EMOJI_DRAGON} **[ DV ] Dragons Statistics**",
             description=f"**Canal:** {canal.mention}\n**Encabezado:** {encabezado}\n**Texto:** {texto}\n**GIF:** [Ver imagen]({gif})",
             color=discord.Color.green()
         )
@@ -155,12 +158,81 @@ async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo:
 
         embed = discord.Embed(
             title=f"{EMOJI_BAN} Usuario Baneado",
-            description=f"**{usuario.mention}** ha sido baneado.\n📝 Motivo: **{motivo}**",
+            description=f"**{usuario.mention}** ha sido baneado.\n{EMOJI_NOTES} Motivo: **{motivo}**",
             color=discord.Color.red()
         )
         await interaction.response.send_message(embed=embed)
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al banear: {e}", ephemeral=True)
+
+# ==============================
+# COMANDO /WARN
+# ==============================
+@bot.tree.command(name="warn", description="Advierte a un usuario y guarda la advertencia en Supabase.")
+@app_commands.describe(usuario="Usuario a advertir", motivo="Motivo de la advertencia")
+async def warn(interaction: discord.Interaction, usuario: discord.Member, motivo: str):
+    try:
+        # Insertar advertencia en Supabase
+        supabase.table("warns").insert({
+            "user_id": str(usuario.id),
+            "username": usuario.name,
+            "reason": motivo,
+            "warned_by": interaction.user.name
+        }).execute()
+
+        embed = discord.Embed(
+            title=f"{EMOJI_WARNS} Usuario Advertido",
+            description=f"{EMOJI_NOTES} **Usuario:** {usuario.mention}\n{EMOJI_FIRE} **Motivo:** {motivo}\n{EMOJI_BOT} **Moderador:** {interaction.user.mention}",
+            color=discord.Color.orange()
+        )
+        await interaction.response.send_message(embed=embed)
+
+        # Enviar DM al usuario advertido
+        try:
+            dm_embed = discord.Embed(
+                title=f" {EMOJI_ALERT}⚠️ Has sido advertido en {interaction.guild.name}",
+                description=f"**Motivo:** {motivo}\n**Moderador:** {interaction.user.name}",
+                color=discord.Color.orange()
+            )
+            await usuario.send(embed=dm_embed)
+        except:
+            pass
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al registrar la advertencia: {e}", ephemeral=True)
+
+
+# ==============================
+# COMANDO /VER-WARNS
+# ==============================
+@bot.tree.command(name="ver-warns", description="Muestra las advertencias registradas de un usuario.")
+@app_commands.describe(usuario="Usuario del que deseas ver las advertencias")
+async def ver_warns(interaction: discord.Interaction, usuario: discord.Member):
+    try:
+        data = supabase.table("warns").select("*").eq("user_id", str(usuario.id)).execute()
+
+        if not data.data:
+            await interaction.response.send_message(f"✅ {usuario.mention} no tiene advertencias registradas.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"{EMOJI_NOTES} Advertencias de {usuario.name}",
+            color=discord.Color.gold()
+        )
+
+        for warn in data.data:
+            fecha = warn["warned_at"][:19].replace("T", " ")
+            embed.add_field(
+                name=f"{EMOJI_FIRE} Motivo: {warn['reason']}",
+                value=f"{EMOJI_MOD} Por: **{warn['warned_by']}**\n🕓 {fecha}",
+                inline=False
+            )
+
+        embed.set_footer(text="Sistema de Advertencias • Dragons")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al obtener advertencias: {e}", ephemeral=True)
 
 # ==============================
 # COMANDO /BOTSTATISTICS
