@@ -111,7 +111,7 @@ async def on_ready():
 # ==============================
 # COMANDO /CREAR-BIENVENIDA
 # ==============================
-@bot.tree.command(name="", description="Crea una bienvenida personalizada para este servidor.")
+@bot.tree.command(name="Crear_Bienvenida", description="Crea una bienvenida personalizada para este servidor.")
 @app_commands.describe(
     canal="Canal donde se enviará la bienvenida.",
     encabezado="Título del mensaje.",
