@@ -46,6 +46,7 @@ EMOJI_BAN = "<a:Ban:1432857189092950169>"
 EMOJI_NOTES = "<a:Notas:1432881765000937483>"
 EMOJI_ALERT = "<a:Alerta:1432884129044893748>"
 EMOJI_WARNS = "<a:Warns:1432883811007467682>"
+EMOJI_MUTE = "<a:Mute:1432898957595643945>"
 
 # ==============================
 # EVENTOS DE REGISTRO AUTOMÁTICO
@@ -110,7 +111,7 @@ async def on_ready():
 # ==============================
 # COMANDO /CREAR-BIENVENIDA
 # ==============================
-@bot.tree.command(name="crear-bienvenida", description="Crea una bienvenida personalizada para este servidor.")
+@bot.tree.command(name="", description="Crea una bienvenida personalizada para este servidor.")
 @app_commands.describe(
     canal="Canal donde se enviará la bienvenida.",
     encabezado="Título del mensaje.",
@@ -144,7 +145,7 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
 # ==============================
 # COMANDO /BAN (solo administradores)
 # ==============================
-@bot.tree.command(name="ban", description="Banea a un usuario y lo guarda en la base de datos (solo admins).")
+@bot.tree.command(name="Ban", description="Banea a un usuario y lo guarda en la base de datos (solo admins).")
 @app_commands.describe(usuario="Usuario a banear", motivo="Motivo del baneo")
 async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo: str):
     # 🔒 Verificación de permisos
@@ -185,6 +186,36 @@ async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo:
 
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al banear: {e}", ephemeral=True)
+
+# ==============================
+# COMANDO /ELIMINAR BAN (solo administradores)
+# ==============================
+
+@bot.tree.command(name="Unban", description="Desbanea a un usuario (solo administradores).")
+@app_commands.describe(usuario="ID del usuario que deseas desbanear")
+@app_commands.checks.has_permissions(administrator=True)
+async def eliminar_ban(interaction: discord.Interaction, usuario: str):
+    try:
+        # Verificar si el usuario tiene permisos de administrador
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("🚫 No tienes permisos para usar este comando.", ephemeral=True)
+            return
+
+        user = await bot.fetch_user(int(usuario))
+        await interaction.guild.unban(user)
+
+        embed = discord.Embed(
+            title=f" {EMOJI_ALERT} Usuario Desbaneado",
+            description=f"El usuario **{user.name}** ha sido desbaneado correctamente.",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"Acción realizada por: {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
+        await interaction.response.send_message(embed=embed)
+
+    except discord.NotFound:
+        await interaction.response.send_message("No se encontró ese usuario en la lista de baneos.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ocurrió un error: {e}", ephemeral=True)
 
 
 # ==============================
@@ -243,7 +274,7 @@ async def warn(interaction: discord.Interaction, usuario: discord.Member, motivo
 # ==============================
 # COMANDO /VER-WARNS
 # ==============================
-@bot.tree.command(name="ver-warns", description="Muestra las advertencias registradas de un usuario.")
+@bot.tree.command(name="warnings", description="Muestra las advertencias registradas de un usuario.")
 @app_commands.describe(usuario="Usuario del que deseas ver las advertencias")
 async def ver_warns(interaction: discord.Interaction, usuario: discord.Member):
     try:
@@ -275,7 +306,7 @@ async def ver_warns(interaction: discord.Interaction, usuario: discord.Member):
 # ==============================
 # COMANDO /ELIMINAR-WARN (solo administradores)
 # ==============================
-@bot.tree.command(name="eliminar-warn", description="Elimina una advertencia específica o todas las de un usuario (solo admins).")
+@bot.tree.command(name="UnWarns", description="Elimina una advertencia específica o todas las de un usuario (solo admins).")
 @app_commands.describe(
     usuario="Usuario del que deseas eliminar advertencias",
     warn_id="ID de la advertencia a eliminar (déjalo vacío para eliminar todas)"
@@ -355,6 +386,159 @@ async def bot_statistics(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al obtener estadísticas: {e}", ephemeral=True)
+
+# ==============================
+# COMANDO /MUTE (solo administradores)
+# ==============================
+
+@bot.tree.command(name="Mute", description="Silencia a un usuario temporalmente (solo administradores).")
+@app_commands.describe(
+    usuario="Usuario que será silenciado",
+    minutos="Duración del silencio en minutos",
+    motivo="Motivo del mute"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def mute(interaction: discord.Interaction, usuario: discord.Member, minutos: int, motivo: str = "No especificado"):
+    import datetime
+    import discord
+
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("🚫 No tienes permisos para usar este comando.", ephemeral=True)
+        return
+
+    if usuario == interaction.user:
+        await interaction.response.send_message("❌ No puedes mutearte a ti mismo.", ephemeral=True)
+        return
+
+    if usuario.guild_permissions.administrator:
+        await interaction.response.send_message("⚠️ No puedes silenciar a otro administrador.", ephemeral=True)
+        return
+
+    try:
+        duracion = datetime.timedelta(minutes=minutos)
+        await usuario.timeout(discord.utils.utcnow() + duracion, reason=motivo)
+
+        embed = discord.Embed(
+            title=f"{EMOJI_MUTE} Usuario Silenciado",
+            description=(
+                f"**{EMOJI_DERECHA} Usuario:** {usuario.mention}\n"
+                f"**{EMOJI_TIME} Duración:** {minutos} minutos\n"
+                f"**{EMOJI_TIME} Motivo:** {motivo}"
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"Silenciado por {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
+        embed.timestamp = datetime.datetime.utcnow()
+
+        await interaction.response.send_message(embed=embed)
+
+        try:
+            embed_dm = discord.Embed(
+                title=f" {EMOJI_MUTE} Has sido silenciado",
+                description=(
+                    f"{EMOJI_MOD} Has sido silenciado en **{interaction.guild.name}** por **{minutos} minutos**.\n"
+                    f"{EMOJI_NOTES} **Motivo:** {motivo}"
+                ),
+                color=discord.Color.dark_red()
+            )
+            await usuario.send(embed=embed_dm)
+        except:
+            pass
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al aplicar el mute: `{e}`", ephemeral=True)
+
+# ==============================
+# COMANDO /MUTE (solo administradores)
+# ==============================
+
+@bot.tree.command(name="Unmute", description="Quita el silencio de un usuario (solo administradores).")
+@app_commands.describe(
+    usuario="Usuario al que se le quitará el silencio",
+    motivo="Motivo para quitar el mute"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def unmute(interaction: discord.Interaction, usuario: discord.Member, motivo: str = "No especificado"):
+    import datetime
+    import discord
+
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("🚫 No tienes permisos para usar este comando.", ephemeral=True)
+        return
+
+    if usuario == interaction.user:
+        await interaction.response.send_message("❌ No puedes modificar tu propio silencio.", ephemeral=True)
+        return
+
+    try:
+        # Quitar el mute (timeout)
+        await usuario.timeout(None, reason=motivo)
+
+        embed = discord.Embed(
+            title=f"{EMOJI_ALERT} Usuario Desmuteado",
+            description=(
+                f"**{EMOJI_DRAGON} Usuario:** {usuario.mention}\n"
+                f"**{EMOJI_NOTES} Motivo:** {motivo}"
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"Desmuteado por {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
+        embed.timestamp = datetime.datetime.utcnow()
+
+        await interaction.response.send_message(embed=embed)
+
+        # Mensaje directo al usuario
+        try:
+            embed_dm = discord.Embed(
+                title="🔊 Se te ha quitado el silencio",
+                description=(
+                    f"Tu silencio en **{interaction.guild.name}** ha sido levantado.\n"
+                    f"**Motivo:** {motivo}"
+                ),
+                color=discord.Color.green()
+            )
+            await usuario.send(embed=embed_dm)
+        except:
+            pass
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al quitar el mute: `{e}`", ephemeral=True)
+
+# ==============================
+# COMANDO /PERFIL (solo administradores)
+# ==============================
+
+@bot.tree.command(name="UserInfo", description="Muestra tu perfil o el de otro usuario.")
+@app_commands.describe(usuario="Usuario a consultar (opcional)")
+async def perfil(interaction: discord.Interaction, usuario: discord.Member = None):
+    import datetime
+    if usuario is None:
+        usuario = interaction.user
+
+    # Buscar warns del usuario en Supabase
+    warns_data = supabase.table("warns").select("*").eq("user_id", str(usuario.id)).execute()
+    total_warns = len(warns_data.data) if warns_data.data else 0
+
+    # Calcular días en el servidor
+    joined_days = (datetime.datetime.utcnow() - usuario.joined_at.replace(tzinfo=None)).days
+
+    embed = discord.Embed(
+        title=f"👤 Perfil de {usuario.name}",
+        description=(
+            f"**{EMOJI_FIRE} ID:** `{usuario.id}`\n"
+            f"**{EMOJI_DRAGON} Se unió hace:** `{joined_days}` días\n"
+            f"**{EMOJI_ALERT} Advertencias:** `{total_warns}`\n"
+            f"**{EMOJI_NOTES} Servidor:** {interaction.guild.name}\n\n"
+            f"{EMOJI_DRAGON} *Usuario registrado en Dragons System*"
+        ),
+        color=discord.Color.blue()
+    )
+
+    embed.set_thumbnail(url=usuario.display_avatar.url)
+    embed.set_footer(text=f"Consulta realizada por {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
+    embed.timestamp = datetime.datetime.utcnow()
+
+    await interaction.response.send_message(embed=embed)
 
 # ==============================
 # MINI SERVIDOR FLASK PARA RENDER
