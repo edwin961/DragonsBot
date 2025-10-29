@@ -111,7 +111,7 @@ async def on_ready():
 # ==============================
 # COMANDO /CREAR-BIENVENIDA
 # ==============================
-@bot.tree.command(name="crear_Bienvenida", description="Crea una bienvenida personalizada para este servidor.")
+@bot.tree.command(name="crear-bienvenida", description="Crea una bienvenida personalizada para este servidor.")
 @app_commands.describe(
     canal="Canal donde se enviará la bienvenida.",
     encabezado="Título del mensaje.",
@@ -306,7 +306,7 @@ async def ver_warns(interaction: discord.Interaction, usuario: discord.Member):
 # ==============================
 # COMANDO /ELIMINAR-WARN (solo administradores)
 # ==============================
-@bot.tree.command(name="unWarns", description="Elimina una advertencia específica o todas las de un usuario (solo admins).")
+@bot.tree.command(name="unwarns", description="Elimina una advertencia específica o todas las de un usuario (solo admins).")
 @app_commands.describe(
     usuario="Usuario del que deseas eliminar advertencias",
     warn_id="ID de la advertencia a eliminar (déjalo vacío para eliminar todas)"
@@ -508,7 +508,7 @@ async def unmute(interaction: discord.Interaction, usuario: discord.Member, moti
 # COMANDO /PERFIL (solo administradores)
 # ==============================
 
-@bot.tree.command(name="userInfo", description="Muestra tu perfil o el de otro usuario.")
+@bot.tree.command(name="userinfo", description="Muestra tu perfil o el de otro usuario.")
 @app_commands.describe(usuario="Usuario a consultar (opcional)")
 async def perfil(interaction: discord.Interaction, usuario: discord.Member = None):
     import datetime
