@@ -924,17 +924,9 @@ async def restart_server(interaction: discord.Interaction, backup_id: int):
     await interaction.response.defer(ephemeral=True)
 
     try:
-        # Buscar el backup por ID
+        # Buscar el backup
         response = supabase.table("server_backups").select("*").eq("id", backup_id).execute()
-
-        # Manejar versiones de cliente
-        backup_record = None
-        if hasattr(response, "data"):  # versiones modernas
-            backup_record = response.data[0] if response.data else None
-        elif isinstance(response, dict) and "data" in response:  # fallback
-            backup_record = response["data"][0] if response["data"] else None
-        elif isinstance(response, list):  # si devuelve lista directamente
-            backup_record = response[0] if response else None
+        backup_record = response.data[0] if response.data else None
 
         if not backup_record:
             await interaction.followup.send("❌ No se encontró el backup especificado.", ephemeral=True)
@@ -942,15 +934,11 @@ async def restart_server(interaction: discord.Interaction, backup_id: int):
 
         backup_data = backup_record["backup_data"]
 
-        # Enviar confirmación al dueño por DM
+        # Confirmación por DM al dueño
         dm = await owner.create_dm()
         confirm_embed = discord.Embed(
-            title="⚠️ Confirmación de reinicio",
-            description=(
-                f"¿Deseas restaurar el servidor **{interaction.guild.name}** a la copia del "
-                f"{backup_record['created_at'][:19]}?\n\n"
-                f"**Esto podría borrar o modificar canales actuales.**"
-            ),
+            title="⚠️ Confirmar reinicio del servidor",
+            description=f"¿Deseas restaurar el servidor **{interaction.guild.name}**?\n\nEsto **borrará todos los canales actuales** y recreará la estructura guardada.",
             color=0xffcc00
         )
         confirm_embed.set_footer(text="Reacciona con ✅ para confirmar o ❌ para cancelar.")
@@ -958,19 +946,84 @@ async def restart_server(interaction: discord.Interaction, backup_id: int):
         await message.add_reaction("✅")
         await message.add_reaction("❌")
 
-        # Esperar confirmación
         def check(reaction, user):
             return user == owner and str(reaction.emoji) in ["✅", "❌"]
 
         reaction, _ = await bot.wait_for("reaction_add", timeout=60.0, check=check)
 
-        if str(reaction.emoji) == "✅":
-            # Aquí iría la restauración real (canales, roles, etc.)
-            await dm.send("✅ Servidor restaurado correctamente (simulado).")
-            await interaction.followup.send("🔄 Servidor restaurado con éxito (confirmado por el dueño).", ephemeral=True)
-        else:
+        if str(reaction.emoji) == "❌":
             await dm.send("❌ Restauración cancelada.")
             await interaction.followup.send("Restauración cancelada por el dueño.", ephemeral=True)
+            return
+
+        # ======================
+        # 1️⃣ Borrar canales actuales
+        # ======================
+        for channel in interaction.guild.channels:
+            try:
+                await channel.delete()
+            except Exception:
+                pass
+
+        # ======================
+        # 2️⃣ Recrear roles
+        # ======================
+        for role_info in backup_data.get("roles", []):
+            try:
+                await interaction.guild.create_role(
+                    name=role_info["name"],
+                    permissions=discord.Permissions(role_info["permissions"]),
+                    color=discord.Color(role_info["color"])
+                )
+            except Exception:
+                pass
+
+        # ======================
+        # 3️⃣ Recrear categorías y canales
+        # ======================
+        # Primero las categorías
+        categories = {}
+        for channel_info in backup_data.get("channels", []):
+            if channel_info["type"] == "category":
+                cat = await interaction.guild.create_category(name=channel_info["name"], position=channel_info["position"])
+                categories[channel_info["name"]] = cat
+
+        # Luego los canales dentro de categorías
+        for channel_info in backup_data.get("channels", []):
+            if channel_info["type"] == "text":
+                category = categories.get(channel_info["category"])
+                await interaction.guild.create_text_channel(
+                    name=channel_info["name"],
+                    category=category,
+                    position=channel_info["position"]
+                )
+            elif channel_info["type"] == "voice":
+                category = categories.get(channel_info["category"])
+                await interaction.guild.create_voice_channel(
+                    name=channel_info["name"],
+                    category=category,
+                    position=channel_info["position"]
+                )
+
+        # ======================
+        # 4️⃣ Confirmación final
+        # ======================
+        await dm.send(f"✅ Servidor **{interaction.guild.name}** restaurado correctamente desde el backup #{backup_id}.")
+        await interaction.followup.send(
+            embed=discord.Embed(
+                title="🔄 Servidor restaurado",
+                description=f"Se restauró **{interaction.guild.name}** desde la copia #{backup_id}.",
+                color=0x00ff00
+            ),
+            ephemeral=True
+        )
+
+        # Registrar restauración
+        supabase.table("server_restores").insert({
+            "guild_id": str(interaction.guild.id),
+            "backup_id": backup_record["id"],
+            "restored_by": str(interaction.user.id),
+        }).execute()
 
     except Exception as e:
         await interaction.followup.send(
@@ -981,38 +1034,6 @@ async def restart_server(interaction: discord.Interaction, backup_id: int):
             ),
             ephemeral=True
         )
-
-
-# ==============================
-# COMANDO /list-backups
-# ==============================
-@bot.tree.command(name="list-backups", description="Muestra las copias de seguridad guardadas del servidor.")
-async def list_backups(interaction: discord.Interaction):
-    owner = interaction.guild.owner
-    if interaction.user.id != owner.id:
-        await interaction.response.send_message("Solo el dueño del servidor puede listar copias de seguridad.", ephemeral=True)
-        return
-
-    backups = supabase.table("server_backups").select("*").eq("guild_id", str(interaction.guild.id)).execute().data
-
-    if not backups:
-        await interaction.response.send_message("No hay copias guardadas para este servidor.", ephemeral=True)
-        return
-
-    embed = discord.Embed(
-        title=f"📦 Copias de {interaction.guild.name}",
-        description="Selecciona una copia para restaurar con `/restart-server`.",
-        color=0x0099ff
-    )
-
-    for i, backup in enumerate(backups[-5:], start=1):  # últimas 5
-        embed.add_field(
-            name=f"Backup #{i}",
-            value=f"📅 {backup['created_at'][:19]}\n🆔 ID: `{backup['id']}`",
-            inline=False
-        )
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 
