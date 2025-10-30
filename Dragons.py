@@ -702,89 +702,64 @@ def channel_to_dict(channel):
 # ==============================
 # COMANDO /copy-server
 # ==============================
-@bot.tree.command(name="copy-server", description="Guarda una copia del servidor en la base de datos (solo dueño).")
+@bot.tree.command(name="copy-server", description="Crea una copia de seguridad del servidor actual.")
 async def copy_server(interaction: discord.Interaction):
+    owner = interaction.guild.owner
+    if interaction.user.id != owner.id:
+        await interaction.response.send_message("Solo el dueño del servidor puede crear copias de seguridad.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+
     try:
-        guild = interaction.guild
-        # Verificar dueño
-        if interaction.user.id != guild.owner_id:
-            await interaction.response.send_message("🚫 Solo el dueño del servidor puede ejecutar este comando.", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        # Construir respaldo
-        backup = {
-            "guild": {
-                "id": str(guild.id),
-                "name": guild.name,
-                "icon_url": str(guild.icon.url) if guild.icon else None,
-                "afk_timeout": guild.afk_timeout,
-                "verification_level": str(guild.verification_level)
-            },
-            "roles": [],
-            "categories": [],
-            "channels": [],
-            "emojis": []
-        }
-
-        # Roles (omitimos @everyone)
-        for role in guild.roles:
-            if role == guild.default_role:
-                continue
-            backup["roles"].append(role_to_dict(role))
-
-        # Categories
-        for cat in guild.categories:
-            backup["categories"].append({
-                "id": str(cat.id),
-                "name": cat.name,
-                "position": cat.position
-            })
-
-        # Channels (text & voice), incluye overwrites
-        for channel in guild.channels:
-            backup["channels"].append(channel_to_dict(channel))
-
-        # Emojis
-        for emoji in guild.emojis:
-            backup["emojis"].append({
-                "id": str(emoji.id),
-                "name": emoji.name,
-                "animated": emoji.animated,
-                "url": str(emoji.url)
-            })
-
-        # Guardar en Supabase
-        row = {
+        # Extraer datos serializables del servidor
+        backup_data = {
             "guild_id": str(guild.id),
             "guild_name": guild.name,
-            "owner_id": str(guild.owner_id),
-            "data": backup
+            "created_at": str(datetime.datetime.utcnow()),
+            "roles": [
+                {"id": str(r.id), "name": r.name, "permissions": r.permissions.value, "color": r.color.value}
+                for r in guild.roles if not r.is_default()
+            ],
+            "channels": [
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "type": str(c.type),
+                    "category": c.category.name if c.category else None,
+                    "position": c.position
+                }
+                for c in guild.channels
+            ],
         }
-        res = supabase.table("server_backups").insert(row).execute()
 
-        # Registrar acción
-        supabase.table("backup_actions").insert({
-            "backup_id": res.data[0]["id"] if res.data else None,
+        # Subir a Supabase
+        response = supabase.table("server_backups").insert({
             "guild_id": str(guild.id),
-            "action_type": "backup",
-            "performed_by": str(interaction.user.id),
-            "success": True,
-            "details": {"message": "backup created"}
+            "backup_data": backup_data,
+            "created_at": datetime.datetime.utcnow().isoformat()
         }).execute()
 
-        embed = discord.Embed(
-            title=f"{EMOJI_DRAGON} Backup creado",
-            description=f"{EMOJI_ALERT} Copia del servidor **{guild.name}** guardada correctamente en la base de datos.",
-            color=discord.Color.blue()
+        await interaction.followup.send(
+            embed=discord.Embed(
+                title="✅ Copia creada correctamente",
+                description=f"Se guardó la copia del servidor **{guild.name}** en Supabase.",
+                color=0x00ff00
+            ),
+            ephemeral=True
         )
-        embed.add_field(name="ID backup", value=(res.data[0]["id"] if res.data else "—"), inline=False)
-        embed.set_footer(text="Guarda esta ID para restauraciones si quieres.")
-        await interaction.followup.send(embed=embed, ephemeral=True)
 
     except Exception as e:
-        await interaction.followup.send(f"❌ Error creando backup: `{e}`", ephemeral=True)
+        await interaction.followup.send(
+            embed=discord.Embed(
+                title="❌ Error creando backup",
+                description=f"```{e}```",
+                color=0xff0000
+            ),
+            ephemeral=True
+        )
+
 
 # ==============================
 # RESTAURACIÓN (función helper)
@@ -1057,130 +1032,34 @@ async def restart_server(interaction: discord.Interaction):
 # ==============================
 # COMANDO /list-backups
 # ==============================
-@bot.tree.command(name="list-backups", description="Muestra las copias guardadas del servidor (solo dueño).")
+@bot.tree.command(name="list-backups", description="Muestra las copias de seguridad guardadas del servidor.")
 async def list_backups(interaction: discord.Interaction):
-    guild = interaction.guild
-    if interaction.user.id != guild.owner_id:
-        await interaction.response.send_message("🚫 Solo el dueño del servidor puede usar este comando.", ephemeral=True)
+    owner = interaction.guild.owner
+    if interaction.user.id != owner.id:
+        await interaction.response.send_message("Solo el dueño del servidor puede listar copias de seguridad.", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    # Obtener backups desde Supabase
-    data = supabase.table("server_backups").select("*").eq("guild_id", str(guild.id)).order("created_at", desc=True).execute()
-    backups = data.data
+    backups = supabase.table("server_backups").select("*").eq("guild_id", str(interaction.guild.id)).execute().data
 
     if not backups:
-        await interaction.followup.send("📂 No hay copias guardadas para este servidor.", ephemeral=True)
+        await interaction.response.send_message("No hay copias guardadas para este servidor.", ephemeral=True)
         return
 
-    # Clase de vista con paginación
-    class BackupView(discord.ui.View):
-        def __init__(self, backups, user, timeout=300):
-            super().__init__(timeout=timeout)
-            self.backups = backups
-            self.index = 0
-            self.user = user
+    embed = discord.Embed(
+        title=f"📦 Copias de {interaction.guild.name}",
+        description="Selecciona una copia para restaurar con `/restart-server`.",
+        color=0x0099ff
+    )
 
-        def get_embed(self):
-            b = self.backups[self.index]
-            embed = discord.Embed(
-                title=f"{EMOJI_DRAGON} Copia #{self.index + 1} de {len(self.backups)}",
-                description=f"**Servidor:** {b['guild_name']}\n**Fecha:** {b['created_at']}\n**Restauraciones:** {b.get('restore_count', 0)}",
-                color=discord.Color.blurple()
-            )
-            embed.add_field(name="ID del Backup", value=f"`{b['id']}`", inline=False)
-            embed.set_footer(text="Usa los botones para navegar o restaurar esta copia.")
-            return embed
+    for i, backup in enumerate(backups[-5:], start=1):  # últimas 5
+        embed.add_field(
+            name=f"Backup #{i}",
+            value=f"📅 {backup['created_at'][:19]}\n🆔 ID: `{backup['id']}`",
+            inline=False
+        )
 
-        @discord.ui.button(label="⬅️ Anterior", style=discord.ButtonStyle.secondary)
-        async def previous(self, interaction2: discord.Interaction, button):
-            if interaction2.user.id != self.user.id:
-                await interaction2.response.send_message("❌ No puedes controlar esta lista.", ephemeral=True)
-                return
-            if self.index > 0:
-                self.index -= 1
-                await interaction2.response.edit_message(embed=self.get_embed(), view=self)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        @discord.ui.button(label="➡️ Siguiente", style=discord.ButtonStyle.secondary)
-        async def next(self, interaction2: discord.Interaction, button):
-            if interaction2.user.id != self.user.id:
-                await interaction2.response.send_message("❌ No puedes controlar esta lista.", ephemeral=True)
-                return
-            if self.index < len(self.backups) - 1:
-                self.index += 1
-                await interaction2.response.edit_message(embed=self.get_embed(), view=self)
-
-        @discord.ui.button(label="🔁 Restaurar esta copia", style=discord.ButtonStyle.danger)
-        async def restore_this(self, interaction2: discord.Interaction, button):
-            if interaction2.user.id != self.user.id:
-                await interaction2.response.send_message("❌ Solo el dueño del servidor puede confirmar.", ephemeral=True)
-                return
-            b = self.backups[self.index]
-            backup_id = b["id"]
-            backup_data = b["data"]
-            created_at = b["created_at"]
-
-            # Embed de confirmación
-            dm_embed = discord.Embed(
-                title=f"{EMOJI_ALERT} Confirmación de restauración",
-                description=(
-                    f"Has elegido restaurar **{guild.name}** desde la copia guardada el **{created_at}**.\n\n"
-                    "⚠️ Esto recreará roles, canales y emojis. Puede tardar y está sujeto a permisos del bot.\n\n"
-                    "Pulsa **Confirmar** si deseas continuar."
-                ),
-                color=discord.Color.orange()
-            )
-            dm_embed.set_footer(text="Confirmación solo visible para el dueño del servidor • Dragons")
-
-            class ConfirmRestoreView(discord.ui.View):
-                def __init__(self, timeout=300):
-                    super().__init__(timeout=timeout)
-
-                @discord.ui.button(label="✅ Confirmar restauración", style=discord.ButtonStyle.danger)
-                async def confirm_restore(self, interaction3: discord.Interaction, button2):
-                    if interaction3.user.id != guild.owner_id:
-                        await interaction3.response.send_message("❌ Solo el dueño puede confirmar.", ephemeral=True)
-                        return
-                    await interaction3.response.defer(thinking=True, ephemeral=True)
-                    success, details = await restore_from_backup(
-                        guild, backup_data, invoker_id=interaction3.user.id, backup_row_id=backup_id
-                    )
-
-                    supabase.table("backup_actions").insert({
-                        "backup_id": backup_id,
-                        "guild_id": str(guild.id),
-                        "action_type": "restore",
-                        "performed_by": str(interaction3.user.id),
-                        "success": success,
-                        "details": {"message": details}
-                    }).execute()
-
-                    if success:
-                        await interaction3.followup.send(f"✅ Restauración completada correctamente: {details}", ephemeral=True)
-                    else:
-                        await interaction3.followup.send(f"❌ Error restaurando: {details}", ephemeral=True)
-
-                    self.stop()
-
-                @discord.ui.button(label="✖️ Cancelar", style=discord.ButtonStyle.secondary)
-                async def cancel_restore(self, interaction3: discord.Interaction, button2):
-                    if interaction3.user.id != guild.owner_id:
-                        await interaction3.response.send_message("❌ No puedes cancelar esta acción.", ephemeral=True)
-                        return
-                    await interaction3.response.send_message("❎ Restauración cancelada.", ephemeral=True)
-                    self.stop()
-
-            # Enviar DM al dueño con la confirmación
-            try:
-                await interaction2.user.send(embed=dm_embed, view=ConfirmRestoreView())
-                await interaction2.response.send_message("📩 Te envié un DM con la confirmación de restauración.", ephemeral=True)
-            except Exception as e:
-                await interaction2.response.send_message(f"❌ No pude enviarte DM: {e}", ephemeral=True)
-
-    # Enviar el primer embed
-    view = BackupView(backups, interaction.user)
-    await interaction.followup.send(embed=view.get_embed(), view=view, ephemeral=True)
 
 
 # ==============================
