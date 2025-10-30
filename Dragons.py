@@ -47,6 +47,7 @@ EMOJI_NOTES = "<a:Notas:1432881765000937483>"
 EMOJI_ALERT = "<a:Alerta:1432884129044893748>"
 EMOJI_WARNS = "<a:Warns:1432883811007467682>"
 EMOJI_MUTE = "<a:Mute:1432898957595643945>"
+EMOJI_WELCOME = "<a:Welcome:1433493464456105984>"
 
 # ==============================
 # EVENTOS DE REGISTRO AUTOMÁTICO
@@ -490,7 +491,7 @@ async def unmute(interaction: discord.Interaction, usuario: discord.Member, moti
         # Mensaje directo al usuario
         try:
             embed_dm = discord.Embed(
-                title="🔊 Se te ha quitado el silencio",
+                title=f" {EMOJI_DRAGON} Se te ha quitado el silencio",
                 description=(
                     f"Tu silencio en **{interaction.guild.name}** ha sido levantado.\n"
                     f"**Motivo:** {motivo}"
@@ -539,6 +540,93 @@ async def perfil(interaction: discord.Interaction, usuario: discord.Member = Non
     embed.timestamp = datetime.datetime.utcnow()
 
     await interaction.response.send_message(embed=embed)
+
+# ==============================
+# COMANDO /Verificacion 
+# ==============================
+
+
+# ==============================
+# COMANDO /HELP (Lista de comandos del bot)
+# ==============================
+@bot.tree.command(name="help", description="📖 Muestra todos los comandos disponibles del sistema Dragons.")
+async def help_command(interaction: discord.Interaction):
+    try:
+        embed = discord.Embed(
+            title=f"{EMOJI_DRAGON} **[ DV ] Dragons Command Center** {EMOJI_DRAGON}",
+            description=(
+                f"{EMOJI_FIRE} **Bienvenido al sistema de ayuda Dragons**\n"
+                f"Aquí encontrarás todos los comandos disponibles agrupados por categoría.\n\n"
+                f"**Usa los comandos con** `/nombre_comando`\n"
+            ),
+            color=discord.Color.dark_red()
+        )
+
+        # 🧭 Categoría: Bienvenida
+        embed.add_field(
+            name=f"{EMOJI_WELCOME} **Bienvenida**",
+            value=(
+                f"`/crear-bienvenida` → Configura el mensaje de bienvenida personalizado.\n"
+                f"`on_member_join` → Envía automáticamente la bienvenida al nuevo usuario."
+            ),
+            inline=False
+        )
+
+        # ⚔️ Moderación
+        embed.add_field(
+            name=f"{EMOJI_MOD} **Moderación**",
+            value=(
+                f"`/ban` → Banea un usuario del servidor.\n"
+                f"`/unban` → Desbanea un usuario.\n"
+                f"`/mute` → Silencia temporalmente a un usuario.\n"
+                f"`/unmute` → Quita el silencio a un usuario."
+            ),
+            inline=False
+        )
+
+        # ⚠️ Advertencias
+        embed.add_field(
+            name=f"{EMOJI_ALERT} **Advertencias (Warns)**",
+            value=(
+                f"`/warn` → Advierte a un usuario.\n"
+                f"`/warnings` → Muestra las advertencias de un usuario.\n"
+                f"`/unwarns` → Elimina una o todas las advertencias de un usuario."
+            ),
+            inline=False
+        )
+
+        # 📊 Estadísticas y Perfil
+        embed.add_field(
+            name=f"{EMOJI_BOT} **Estadísticas y Perfil**",
+            value=(
+                f"`/botstatistics` → Muestra estadísticas globales del bot.\n"
+                f"`/userinfo` → Muestra el perfil de un usuario."
+            ),
+            inline=False
+        )
+
+        # 🔰 Sistema
+        embed.add_field(
+            name=f"{EMOJI_DERECHA} **Sistema y soporte**",
+            value=(
+                f"`/help` → Muestra este menú de ayuda.\n"
+                f"**Tiempo activo:** El bot lleva funcionando desde su última activación."
+            ),
+            inline=False
+        )
+
+        embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")
+        embed.set_footer(
+            text="🐲 Dragons Development • Centro de Comandos",
+            icon_url="https://cdn.discordapp.com/emojis/1432855375165526036.webp"
+        )
+        embed.timestamp = datetime.datetime.utcnow()
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al mostrar la ayuda: {e}", ephemeral=True)
+
 
 # ==============================
 # MINI SERVIDOR FLASK PARA RENDER
