@@ -914,126 +914,119 @@ async def restore_from_backup(guild: discord.Guild, backup_data: dict, invoker_i
 # ==============================
 # COMANDO /restart-server
 # ==============================
-@bot.tree.command(name="restart-server", description="Restaura el servidor desde una copia guardada.")
+@bot.tree.command(name="restart-server", description="Restaura el servidor desde una copia guardada (solo el dueño del servidor).")
+@app_commands.describe(backup_id="ID del backup que deseas restaurar")
 async def restart_server(interaction: discord.Interaction, backup_id: int):
-    owner = interaction.guild.owner
-    if interaction.user.id != owner.id:
-        await interaction.response.send_message("Solo el dueño del servidor puede reiniciar el servidor.", ephemeral=True)
+    if interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message("❌ Solo el dueño del servidor puede usar este comando.", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True)
+    # Buscar el backup por ID y guild
+    response = supabase.table("server_backups").select("*").eq("guild_id", str(interaction.guild.id)).eq("id", backup_id).execute()
+
+    if not response.data:
+        await interaction.response.send_message("⚠️ No se encontró una copia con ese ID.", ephemeral=True)
+        return
+
+    backup_record = response.data[0]
+    backup_data = backup_record["backup_data"]
+
+    # Enviar confirmación al DM
+    try:
+        dm = await interaction.user.create_dm()
+        embed = discord.Embed(
+            title="⚠️ Confirmación de restauración",
+            description=f"¿Deseas restaurar el servidor usando el backup ID `{backup_id}`?\n\nEsto eliminará roles y canales actuales.",
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="Responde con ✅ para confirmar o ❌ para cancelar.")
+        await dm.send(embed=embed)
+        await interaction.response.send_message("📩 Te envié un mensaje privado para confirmar la restauración.", ephemeral=True)
+    except:
+        await interaction.response.send_message("⚠️ No pude enviarte un mensaje directo. Activa tus DMs.", ephemeral=True)
+        return
+
+    def check(m):
+        return m.author.id == interaction.user.id and m.content in ["✅", "❌"]
 
     try:
-        # Buscar el backup
-        response = supabase.table("server_backups").select("*").eq("id", backup_id).execute()
-        backup_record = response.data[0] if response.data else None
+        msg = await bot.wait_for("message", check=check, timeout=60)
+    except asyncio.TimeoutError:
+        await dm.send("⏰ Tiempo agotado, cancelado.")
+        return
 
-        if not backup_record:
-            await interaction.followup.send("❌ No se encontró el backup especificado.", ephemeral=True)
-            return
+    if msg.content == "❌":
+        await dm.send("❎ Restauración cancelada.")
+        return
 
-        backup_data = backup_record["backup_data"]
+    await dm.send("♻️ Iniciando restauración del servidor...")
 
-        # Confirmación por DM al dueño
-        dm = await owner.create_dm()
-        confirm_embed = discord.Embed(
-            title="⚠️ Confirmar reinicio del servidor",
-            description=f"¿Deseas restaurar el servidor **{interaction.guild.name}**?\n\nEsto **borrará todos los canales actuales** y recreará la estructura guardada.",
-            color=0xffcc00
-        )
-        confirm_embed.set_footer(text="Reacciona con ✅ para confirmar o ❌ para cancelar.")
-        message = await dm.send(embed=confirm_embed)
-        await message.add_reaction("✅")
-        await message.add_reaction("❌")
-
-        def check(reaction, user):
-            return user == owner and str(reaction.emoji) in ["✅", "❌"]
-
-        reaction, _ = await bot.wait_for("reaction_add", timeout=60.0, check=check)
-
-        if str(reaction.emoji) == "❌":
-            await dm.send("❌ Restauración cancelada.")
-            await interaction.followup.send("Restauración cancelada por el dueño.", ephemeral=True)
-            return
-
-        # ======================
-        # 1️⃣ Borrar canales actuales
-        # ======================
+    # ==============================
+    # 1️⃣ ELIMINAR CANALES Y ROLES
+    # ==============================
+    try:
         for channel in interaction.guild.channels:
             try:
                 await channel.delete()
-            except Exception:
+            except:
                 pass
 
-        # ======================
-        # 2️⃣ Recrear roles
-        # ======================
-        for role_info in backup_data.get("roles", []):
+        for role in interaction.guild.roles:
+            if role.is_default():
+                continue
             try:
-                await interaction.guild.create_role(
-                    name=role_info["name"],
-                    permissions=discord.Permissions(role_info["permissions"]),
-                    color=discord.Color(role_info["color"])
-                )
-            except Exception:
+                await role.delete()
+            except:
                 pass
-
-        # ======================
-        # 3️⃣ Recrear categorías y canales
-        # ======================
-        # Primero las categorías
-        categories = {}
-        for channel_info in backup_data.get("channels", []):
-            if channel_info["type"] == "category":
-                cat = await interaction.guild.create_category(name=channel_info["name"], position=channel_info["position"])
-                categories[channel_info["name"]] = cat
-
-        # Luego los canales dentro de categorías
-        for channel_info in backup_data.get("channels", []):
-            if channel_info["type"] == "text":
-                category = categories.get(channel_info["category"])
-                await interaction.guild.create_text_channel(
-                    name=channel_info["name"],
-                    category=category,
-                    position=channel_info["position"]
-                )
-            elif channel_info["type"] == "voice":
-                category = categories.get(channel_info["category"])
-                await interaction.guild.create_voice_channel(
-                    name=channel_info["name"],
-                    category=category,
-                    position=channel_info["position"]
-                )
-
-        # ======================
-        # 4️⃣ Confirmación final
-        # ======================
-        await dm.send(f"✅ Servidor **{interaction.guild.name}** restaurado correctamente desde el backup #{backup_id}.")
-        await interaction.followup.send(
-            embed=discord.Embed(
-                title="🔄 Servidor restaurado",
-                description=f"Se restauró **{interaction.guild.name}** desde la copia #{backup_id}.",
-                color=0x00ff00
-            ),
-            ephemeral=True
-        )
-
-        # Registrar restauración
-        supabase.table("server_restores").insert({
-            "guild_id": str(interaction.guild.id),
-            "backup_id": backup_record["id"],
-            "restored_by": str(interaction.user.id),
-        }).execute()
-
     except Exception as e:
-        await interaction.followup.send(
-            embed=discord.Embed(
-                title="❌ Error en comando restart-server",
-                description=f"```{e}```",
-                color=0xff0000
-            ),
-            ephemeral=True
-        )
+        await dm.send(f"⚠️ Error al limpiar el servidor: {e}")
+        return
+
+    # ==============================
+    # 2️⃣ RESTAURAR ROLES
+    # ==============================
+    role_mapping = {}  # Para vincular roles antiguos y nuevos
+
+    try:
+        sorted_roles = sorted(backup_data.get("roles", []), key=lambda r: r["position"])
+        for r in sorted_roles:
+            new_role = await interaction.guild.create_role(
+                name=r["name"],
+                permissions=discord.Permissions(r["permissions"]),
+                color=discord.Color(r.get("color", 0)),
+                hoist=r.get("hoist", False),
+                mentionable=r.get("mentionable", False)
+            )
+            role_mapping[r["name"]] = new_role
+    except Exception as e:
+        await dm.send(f"⚠️ Error al restaurar roles: {e}")
+        return
+
+    # ==============================
+    # 3️⃣ RESTAURAR CATEGORÍAS Y CANALES
+    # ==============================
+    try:
+        for cat_data in backup_data.get("categories", []):
+            category = await interaction.guild.create_category(cat_data["name"])
+            for ch in cat_data.get("channels", []):
+                if ch["type"] == "text":
+                    await category.create_text_channel(name=ch["name"])
+                elif ch["type"] == "voice":
+                    await category.create_voice_channel(name=ch["name"])
+    except Exception as e:
+        await dm.send(f"⚠️ Error al restaurar canales: {e}")
+        return
+
+    # ==============================
+    # 4️⃣ CONFIRMAR Y GUARDAR REGISTRO
+    # ==============================
+    supabase.table("server_restores").insert({
+        "guild_id": str(interaction.guild.id),
+        "backup_id": backup_id,
+        "restored_by": str(interaction.user.id),
+    }).execute()
+
+    await dm.send("✅ Servidor restaurado completamente con éxito.")
 
 
 
