@@ -121,24 +121,42 @@ async def on_ready():
     canal="Canal donde se enviará la bienvenida.",
     encabezado="Título del mensaje.",
     texto="Texto del mensaje (usa {usuario} para mencionar al nuevo miembro).",
-    gif="URL del GIF o imagen."
+    gif="URL del GIF o imagen.",
+    color="Color del embed en formato hexadecimal (ejemplo: #4169e1 o 4169e1)"
 )
-async def crear_bienvenida(interaction: discord.Interaction, canal: discord.TextChannel, encabezado: str, texto: str, gif: str):
+async def crear_bienvenida(interaction: discord.Interaction, canal: discord.TextChannel, encabezado: str, texto: str, gif: str, color: str = "#0099ff"):
     guild_id = str(interaction.guild.id)
 
+    # Limpiar el color (remover # si existe y validar)
+    color_limpio = color.lstrip('#')
+    
+    # Validar que sea un color hexadecimal válido
+    if len(color_limpio) != 6 or not all(c in '0123456789abcdefABCDEF' for c in color_limpio):
+        await interaction.response.send_message(
+            "❌ **Color inválido.** Usa un formato hexadecimal válido.\n"
+            "**Ejemplos:** `#4169e1`, `4169e1`, `#ff0000`, `00ff00`",
+            ephemeral=True
+        )
+        return
+
     try:
+        # Convertir hex a color de Discord
+        color_int = int(color_limpio, 16)
+        color_embed = discord.Color(color_int)
+
         supabase.table("bienvenidas").upsert({
             "guild_id": guild_id,
             "canal_id": canal.id,
             "encabezado": encabezado,
             "texto": texto,
-            "gif": gif
+            "gif": gif,
+            "color": color_limpio
         }).execute()
 
         embed = discord.Embed(
             title=f"{EMOJI_DRAGON} **[ DV ] Dragons Statistics**",
-            description=f"**Canal:** {canal.mention}\n**Encabezado:** {encabezado}\n**Texto:** {texto}\n**GIF:** [Ver imagen]({gif})",
-            color=discord.Color.blue()
+            description=f"**Canal:** {canal.mention}\n**Encabezado:** {encabezado}\n**Texto:** {texto}\n**Color:** `#{color_limpio}`\n**GIF:** [Ver imagen]({gif})",
+            color=color_embed
         )
         embed.set_image(url=gif)
         embed.set_footer(text="Sistema de Bienvenida • Dragons")
@@ -146,51 +164,6 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
 
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al guardar la configuración: {e}", ephemeral=True)
-
-# ==============================
-# COMANDO /BAN (solo administradores)
-# ==============================
-@bot.tree.command(name="ban", description="Banea a un usuario y lo guarda en la base de datos (solo admins).")
-@app_commands.describe(usuario="Usuario a banear", motivo="Motivo del baneo")
-async def ban(interaction: discord.Interaction, usuario: discord.Member, motivo: str):
-    # 🔒 Verificación de permisos
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message(
-            "🚫 No tienes permiso para usar este comando. Solo administradores pueden banear.",
-            ephemeral=True
-        )
-        return
-
-    try:
-        await usuario.ban(reason=motivo)
-        supabase.table("baneados").insert({
-            "user_id": str(usuario.id),
-            "username": usuario.name,
-            "reason": motivo,
-            "banned_at": datetime.datetime.utcnow().isoformat()
-        }).execute()
-
-        embed = discord.Embed(
-            title=f"{EMOJI_BAN} Usuario Baneado",
-            description=f"**{usuario.mention}** ha sido baneado.\n{EMOJI_NOTES} Motivo: **{motivo}**",
-            color=discord.Color.red()
-        )
-        embed.set_footer(text="Sistema de Moderación • Dragons")
-        await interaction.response.send_message(embed=embed)
-
-        # DM opcional al usuario baneado
-        try:
-            dm_embed = discord.Embed(
-                title=f"{EMOJI_ALERT} Has sido baneado de {interaction.guild.name}",
-                description=f"**Motivo:** {motivo}",
-                color=discord.Color.blue()
-            )
-            await usuario.send(embed=dm_embed)
-        except:
-            pass
-
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Error al banear: {e}", ephemeral=True)
 
 # ==============================
 # COMANDO /ELIMINAR BAN (solo administradores)
