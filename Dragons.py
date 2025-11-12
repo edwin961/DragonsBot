@@ -52,6 +52,10 @@ EMOJI_ALERT = "<a:Alerta:1432884129044893748>"
 EMOJI_WARNS = "<a:Warns:1432883811007467682>"
 EMOJI_MUTE = "<a:Mute:1432898957595643945>"
 EMOJI_WELCOME = "<a:Welcome:1433493464456105984>"
+EMOJI_TICKET = "🎫"
+EMOJI_LOCK = "🔒"
+EMOJI_UNLOCK = "🔓"
+EMOJI_CLOSE = "❌"
 
 # ==============================
 # EVENTOS DE REGISTRO AUTOMÁTICO
@@ -164,6 +168,271 @@ async def crear_bienvenida(interaction: discord.Interaction, canal: discord.Text
 
     except Exception as e:
         await interaction.response.send_message(f"❌ Error al guardar la configuración: {e}", ephemeral=True)
+
+# ==============================
+# SISTEMA DE TICKETS - CONFIGURACIÓN
+# ==============================
+
+@bot.tree.command(name="ticket-config", description="Configura el sistema de tickets (solo administradores)")
+@app_commands.describe(
+    categoria="Categoría donde se crearán los tickets",
+    canal_logs="Canal donde se registrarán los logs de tickets",
+    rol_soporte="Rol que podrá ver los tickets",
+    titulo="Título del embed de tickets",
+    descripcion="Descripción del embed",
+    color="Color del embed (hex, ej: #4169e1)"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def ticket_config(
+    interaction: discord.Interaction,
+    categoria: discord.CategoryChannel,
+    canal_logs: discord.TextChannel,
+    rol_soporte: discord.Role,
+    titulo: str = "🎫 Sistema de Tickets",
+    descripcion: str = "Haz clic en el botón para crear un ticket",
+    color: str = "#4169e1"
+):
+    guild_id = str(interaction.guild.id)
+    color_limpio = color.lstrip('#')
+    
+    if len(color_limpio) != 6 or not all(c in '0123456789abcdefABCDEF' for c in color_limpio):
+        await interaction.response.send_message("❌ Color inválido. Usa formato hexadecimal.", ephemeral=True)
+        return
+
+    try:
+        # Guardar configuración en Supabase
+        supabase.table("ticket_config").upsert({
+            "guild_id": guild_id,
+            "categoria_id": str(categoria.id),
+            "canal_logs_id": str(canal_logs.id),
+            "rol_soporte_id": str(rol_soporte.id),
+            "titulo": titulo,
+            "descripcion": descripcion,
+            "color": color_limpio
+        }).execute()
+
+        embed = discord.Embed(
+            title=f"{EMOJI_TICKET} Configuración de Tickets Guardada",
+            description=(
+                f"**Categoría:** {categoria.mention}\n"
+                f"**Canal de Logs:** {canal_logs.mention}\n"
+                f"**Rol de Soporte:** {rol_soporte.mention}\n"
+                f"**Título:** {titulo}\n"
+                f"**Color:** `#{color_limpio}`"
+            ),
+            color=discord.Color(int(color_limpio, 16))
+        )
+        embed.set_footer(text="Sistema de Tickets • Dragons")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al guardar configuración: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="ticket-panel", description="Crea el panel de tickets en este canal (solo administradores)")
+@app_commands.checks.has_permissions(administrator=True)
+async def ticket_panel(interaction: discord.Interaction):
+    guild_id = str(interaction.guild.id)
+    
+    try:
+        # Obtener configuración
+        config_data = supabase.table("ticket_config").select("*").eq("guild_id", guild_id).execute()
+        
+        if not config_data.data:
+            await interaction.response.send_message(
+                "❌ No hay configuración de tickets. Usa `/ticket-config` primero.",
+                ephemeral=True
+            )
+            return
+        
+        config = config_data.data[0]
+        color = discord.Color(int(config["color"], 16))
+        
+        # Crear embed del panel
+        embed = discord.Embed(
+            title=config["titulo"],
+            description=config["descripcion"],
+            color=color
+        )
+        embed.add_field(
+            name=f"{EMOJI_FIRE} ¿Necesitas ayuda?",
+            value="Presiona el botón de abajo para abrir un ticket.\nNuestro equipo te atenderá lo antes posible.",
+            inline=False
+        )
+        embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")
+        embed.set_footer(text="Sistema de Tickets • Dragons")
+        embed.timestamp = datetime.datetime.utcnow()
+        
+        # Crear botón
+        view = TicketButton()
+        
+        await interaction.channel.send(embed=embed, view=view)
+        await interaction.response.send_message("✅ Panel de tickets creado correctamente.", ephemeral=True)
+        
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al crear panel: {e}", ephemeral=True)
+
+
+# ==============================
+# BOTÓN PARA CREAR TICKETS
+# ==============================
+class TicketButton(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    
+    @discord.ui.button(label="Crear Ticket", style=discord.ButtonStyle.green, emoji="🎫", custom_id="create_ticket")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_id = str(interaction.guild.id)
+        user_id = str(interaction.user.id)
+        
+        try:
+            # Verificar si el usuario ya tiene un ticket abierto
+            existing = supabase.table("tickets").select("*").eq("guild_id", guild_id).eq("user_id", user_id).eq("estado", "abierto").execute()
+            
+            if existing.data:
+                await interaction.response.send_message(
+                    f"❌ Ya tienes un ticket abierto: <#{existing.data[0]['canal_id']}>",
+                    ephemeral=True
+                )
+                return
+            
+            # Obtener configuración
+            config_data = supabase.table("ticket_config").select("*").eq("guild_id", guild_id).execute()
+            
+            if not config_data.data:
+                await interaction.response.send_message(
+                    "❌ El sistema de tickets no está configurado.",
+                    ephemeral=True
+                )
+                return
+            
+            config = config_data.data[0]
+            categoria = interaction.guild.get_channel(int(config["categoria_id"]))
+            rol_soporte = interaction.guild.get_role(int(config["rol_soporte_id"]))
+            
+            # Crear canal del ticket
+            overwrites = {
+                interaction.guild.default_role: PermissionOverwrite(view_channel=False),
+                interaction.user: PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                rol_soporte: PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                interaction.guild.me: PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
+            }
+            
+            ticket_number = len(supabase.table("tickets").select("id").eq("guild_id", guild_id).execute().data) + 1
+            canal_ticket = await categoria.create_text_channel(
+                name=f"ticket-{ticket_number}-{interaction.user.name}",
+                overwrites=overwrites
+            )
+            
+            # Guardar en base de datos
+            supabase.table("tickets").insert({
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "canal_id": str(canal_ticket.id),
+                "numero": ticket_number,
+                "estado": "abierto"
+            }).execute()
+            
+            # Embed de bienvenida en el ticket
+            embed_ticket = discord.Embed(
+                title=f"{EMOJI_TICKET} Ticket #{ticket_number}",
+                description=f"Hola {interaction.user.mention}, bienvenido a tu ticket.\n\n{EMOJI_FIRE} **El equipo de soporte te atenderá pronto.**",
+                color=discord.Color(int(config["color"], 16))
+            )
+            embed_ticket.add_field(
+                name=f"{EMOJI_NOTES} Instrucciones",
+                value="• Explica tu problema con detalle\n• Sé paciente, el staff responderá pronto\n• Usa los botones de abajo para gestionar el ticket",
+                inline=False
+            )
+            embed_ticket.set_footer(text="Sistema de Tickets • Dragons")
+            embed_ticket.timestamp = datetime.datetime.utcnow()
+            
+            # Botones de control del ticket
+            view_controls = TicketControls()
+            
+            await canal_ticket.send(f"{interaction.user.mention} {rol_soporte.mention}", embed=embed_ticket, view=view_controls)
+            
+            # Log en canal de logs
+            canal_logs = interaction.guild.get_channel(int(config["canal_logs_id"]))
+            if canal_logs:
+                embed_log = discord.Embed(
+                    title=f"{EMOJI_TICKET} Nuevo Ticket Creado",
+                    description=f"**Usuario:** {interaction.user.mention}\n**Canal:** {canal_ticket.mention}\n**Ticket:** #{ticket_number}",
+                    color=discord.Color.green()
+                )
+                embed_log.timestamp = datetime.datetime.utcnow()
+                await canal_logs.send(embed=embed_log)
+            
+            await interaction.response.send_message(
+                f"✅ Tu ticket ha sido creado: {canal_ticket.mention}",
+                ephemeral=True
+            )
+            
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error al crear ticket: {e}", ephemeral=True)
+
+
+# ==============================
+# BOTONES DE CONTROL DEL TICKET
+# ==============================
+class TicketControls(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    
+    @discord.ui.button(label="Cerrar Ticket", style=discord.ButtonStyle.red, emoji="❌", custom_id="close_ticket")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_id = str(interaction.guild.id)
+        canal_id = str(interaction.channel.id)
+        
+        try:
+            # Verificar que el ticket existe
+            ticket_data = supabase.table("tickets").select("*").eq("canal_id", canal_id).execute()
+            
+            if not ticket_data.data:
+                await interaction.response.send_message("❌ No se encontró este ticket.", ephemeral=True)
+                return
+            
+            ticket = ticket_data.data[0]
+            config_data = supabase.table("ticket_config").select("*").eq("guild_id", guild_id).execute()
+            
+            # Crear transcript (resumen del chat)
+            messages = []
+            async for msg in interaction.channel.history(limit=100, oldest_first=True):
+                messages.append(f"[{msg.created_at.strftime('%Y-%m-%d %H:%M')}] {msg.author.name}: {msg.content}")
+            
+            transcript = "\n".join(messages)
+            
+            # Actualizar estado en BD
+            supabase.table("tickets").update({
+                "estado": "cerrado",
+                "cerrado_por": str(interaction.user.id),
+                "cerrado_at": datetime.datetime.utcnow().isoformat()
+            }).eq("canal_id", canal_id).execute()
+            
+            # Enviar log
+            if config_data.data:
+                canal_logs = interaction.guild.get_channel(int(config_data.data[0]["canal_logs_id"]))
+                if canal_logs:
+                    embed_log = discord.Embed(
+                        title=f"{EMOJI_CLOSE} Ticket Cerrado",
+                        description=(
+                            f"**Ticket:** #{ticket['numero']}\n"
+                            f"**Usuario:** <@{ticket['user_id']}>\n"
+                            f"**Cerrado por:** {interaction.user.mention}\n"
+                            f"**Canal:** {interaction.channel.mention}"
+                        ),
+                        color=discord.Color.red()
+                    )
+                    embed_log.timestamp = datetime.datetime.utcnow()
+                    await canal_logs.send(embed=embed_log)
+            
+            await interaction.response.send_message(f"{EMOJI_CLOSE} Cerrando ticket en 5 segundos...")
+            await asyncio.sleep(5)
+            await interaction.channel.delete()
+            
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error al cerrar ticket: {e}", ephemeral=True)
+
 
 # ==============================
 # COMANDO /ELIMINAR BAN (solo administradores)
@@ -340,6 +609,7 @@ async def bot_statistics(interaction: discord.Interaction):
         total_baneados = len(supabase.table("baneados").select("id").execute().data)
         total_usuarios = len(supabase.table("usuarios").select("id").execute().data)
         total_servers = len(supabase.table("servers").select("id").execute().data)
+        total_tickets = len(supabase.table("tickets").select("id").execute().data)
 
         uptime = datetime.datetime.utcnow() - start_time
         days, remainder = divmod(int(uptime.total_seconds()), 86400)
@@ -355,6 +625,7 @@ async def bot_statistics(interaction: discord.Interaction):
         embed.add_field(name=f"{EMOJI_BAN}  Usuarios Baneados", value=f"**{total_baneados}**", inline=True)
         embed.add_field(name=f"{EMOJI_PLANET}  Usuarios Globales", value=f"**{total_usuarios}**", inline=True)
         embed.add_field(name=f"{EMOJI_MOD}  Servidores Activos", value=f"**{total_servers}**", inline=True)
+        embed.add_field(name=f"{EMOJI_TICKET}  Tickets Totales", value=f"**{total_tickets}**", inline=True)
         embed.add_field(name=f"{EMOJI_TIME}  Tiempo Activo", value=f"**{uptime_str}**", inline=False)
 
         embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")
@@ -377,8 +648,7 @@ async def bot_statistics(interaction: discord.Interaction):
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def mute(interaction: discord.Interaction, usuario: discord.Member, minutos: int, motivo: str = "No especificado"):
-    import datetime
-    import discord
+    import asyncio
 
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("🚫 No tienes permisos para usar este comando.", ephemeral=True)
@@ -427,7 +697,7 @@ async def mute(interaction: discord.Interaction, usuario: discord.Member, minuto
         await interaction.response.send_message(f"❌ Error al aplicar el mute: `{e}`", ephemeral=True)
 
 # ==============================
-# COMANDO /MUTE (solo administradores)
+# COMANDO /UNMUTE (solo administradores)
 # ==============================
 
 @bot.tree.command(name="unmute", description="Quita el silencio de un usuario (solo administradores).")
@@ -437,8 +707,6 @@ async def mute(interaction: discord.Interaction, usuario: discord.Member, minuto
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def unmute(interaction: discord.Interaction, usuario: discord.Member, motivo: str = "No especificado"):
-    import datetime
-    import discord
 
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("🚫 No tienes permisos para usar este comando.", ephemeral=True)
@@ -489,7 +757,6 @@ async def unmute(interaction: discord.Interaction, usuario: discord.Member, moti
 @bot.tree.command(name="userinfo", description="Muestra tu perfil o el de otro usuario.")
 @app_commands.describe(usuario="Usuario a consultar (opcional)")
 async def perfil(interaction: discord.Interaction, usuario: discord.Member = None):
-    import datetime
 
     if usuario is None:
         usuario = interaction.user
@@ -520,11 +787,6 @@ async def perfil(interaction: discord.Interaction, usuario: discord.Member = Non
     await interaction.response.send_message(embed=embed)
 
 # ==============================
-# COMANDO /Verificacion 
-# ==============================
-
-
-# ==============================
 # COMANDO /HELP (Lista de comandos del bot)
 # ==============================
 @bot.tree.command(name="help", description="📖 Muestra todos los comandos disponibles del sistema Dragons.")
@@ -546,6 +808,17 @@ async def help_command(interaction: discord.Interaction):
             value=(
                 f"`/crear-bienvenida` → Configura el mensaje de bienvenida personalizado.\n"
                 f"`on_member_join` → Envía automáticamente la bienvenida al nuevo usuario."
+            ),
+            inline=False
+        )
+
+        # 🎫 Sistema de Tickets
+        embed.add_field(
+            name=f"{EMOJI_TICKET} **Sistema de Tickets**",
+            value=(
+                f"`/ticket-config` → Configura el sistema de tickets (categoría, logs, rol soporte).\n"
+                f"`/ticket-panel` → Crea el panel de tickets en el canal actual.\n"
+                f"**Botones:** Crear, Cerrar tickets desde el panel interactivo."
             ),
             inline=False
         )
