@@ -879,267 +879,171 @@ async def help_command(interaction: discord.Interaction):
         await interaction.response.send_message(f"❌ Error al mostrar la ayuda: {e}", ephemeral=True)
 
 # ==============================
-# MODAL PARA CONFIGURAR BOTONES
+# COMANDO /TICKETS (TODO EN UNO)
 # ==============================
-class BotonConfigModal(discord.ui.Modal, title="Configurar Botón de Ticket"):
-    def __init__(self, boton_numero: int, botones_config: list):
-        super().__init__()
-        self.boton_numero = boton_numero
-        self.botones_config = botones_config
-        
-        self.nombre = discord.ui.TextInput(
-            label="Nombre del Botón",
-            placeholder="Ej: Soporte Técnico",
-            max_length=80,
-            required=True
-        )
-        
-        self.emoji = discord.ui.TextInput(
-            label="Emoji del Botón",
-            placeholder="Ej: 🛠️ o <:emoji:id>",
-            max_length=100,
-            required=True
-        )
-        
-        self.color = discord.ui.TextInput(
-            label="Color del Botón",
-            placeholder="green, red, blue, grey (blurple para morado)",
-            max_length=20,
-            required=True,
-            default="green"
-        )
-        
-        self.categoria = discord.ui.TextInput(
-            label="Nombre de Categoría de Ticket",
-            placeholder="Ej: Soporte | Reporte | Ayuda",
-            max_length=50,
-            required=True
-        )
-        
-        self.add_item(self.nombre)
-        self.add_item(self.emoji)
-        self.add_item(self.color)
-        self.add_item(self.categoria)
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        # Validar color
-        colores_validos = {
-            "green": discord.ButtonStyle.green,
-            "red": discord.ButtonStyle.red,
-            "blue": discord.ButtonStyle.primary,
-            "blurple": discord.ButtonStyle.primary,
-            "grey": discord.ButtonStyle.secondary,
-            "gray": discord.ButtonStyle.secondary
-        }
-        
-        color_style = colores_validos.get(self.color.value.lower(), discord.ButtonStyle.green)
-        
-        # Guardar configuración del botón
-        self.botones_config.append({
-            "nombre": self.nombre.value,
-            "emoji": self.emoji.value,
-            "color": self.color.value.lower(),
-            "categoria": self.categoria.value
-        })
-        
-        await interaction.response.send_message(
-            f"✅ **Botón {self.boton_numero}** configurado: `{self.nombre.value}` {self.emoji.value}",
-            ephemeral=True
-        )
-
-
-# ==============================
-# VISTA PARA CONFIGURAR MÚLTIPLES BOTONES
-# ==============================
-class ConfigurarBotonesView(discord.ui.View):
-    def __init__(self, cantidad_botones: int, config_data: dict):
-        super().__init__(timeout=300)
-        self.cantidad_botones = cantidad_botones
-        self.config_data = config_data
-        self.botones_config = []
-        self.botones_configurados = 0
-        
-        # Crear botones dinámicamente
-        for i in range(1, cantidad_botones + 1):
-            button = discord.ui.Button(
-                label=f"Configurar Botón {i}",
-                style=discord.ButtonStyle.primary,
-                custom_id=f"config_btn_{i}"
-            )
-            button.callback = self.crear_callback(i)
-            self.add_item(button)
-        
-        # Botón de finalizar
-        finalizar = discord.ui.Button(
-            label="✅ Finalizar Configuración",
-            style=discord.ButtonStyle.green,
-            custom_id="finalizar_config",
-            row=4
-        )
-        finalizar.callback = self.finalizar_configuracion
-        self.add_item(finalizar)
-    
-    def crear_callback(self, numero):
-        async def callback(interaction: discord.Interaction):
-            modal = BotonConfigModal(numero, self.botones_config)
-            await interaction.response.send_modal(modal)
-            await modal.wait()
-            self.botones_configurados += 1
-        return callback
-    
-    async def finalizar_configuracion(self, interaction: discord.Interaction):
-        if self.botones_configurados < self.cantidad_botones:
-            await interaction.response.send_message(
-                f"❌ Debes configurar todos los {self.cantidad_botones} botones antes de finalizar.",
-                ephemeral=True
-            )
-            return
-        
-        try:
-            # Guardar en Supabase
-            from __main__ import supabase
-            
-            guild_id = str(interaction.guild.id)
-            
-            # Guardar configuración base
-            supabase.table("ticket_config").upsert({
-                "guild_id": guild_id,
-                "categoria_id": str(self.config_data["categoria_id"]),
-                "canal_logs_id": str(self.config_data["canal_logs_id"]),
-                "rol_soporte_id": str(self.config_data["rol_soporte_id"]),
-                "titulo": self.config_data["titulo"],
-                "descripcion": self.config_data["descripcion"],
-                "color": self.config_data["color"],
-                "canal_panel_id": str(self.config_data["canal_panel_id"])
-            }).execute()
-            
-            # Guardar botones
-            for idx, boton in enumerate(self.botones_config):
-                supabase.table("ticket_botones").upsert({
-                    "guild_id": guild_id,
-                    "nombre": boton["nombre"],
-                    "emoji": boton["emoji"],
-                    "color": boton["color"],
-                    "categoria": boton["categoria"],
-                    "orden": idx + 1
-                }).execute()
-            
-            # Crear el panel
-            canal = interaction.guild.get_channel(int(self.config_data["canal_panel_id"]))
-            
-            embed = discord.Embed(
-                title=self.config_data["titulo"],
-                description=self.config_data["descripcion"],
-                color=discord.Color(int(self.config_data["color"], 16))
-            )
-            embed.add_field(
-                name=f"{EMOJI_FIRE} ¿Necesitas ayuda?",
-                value="Selecciona el tipo de ticket que necesitas crear usando los botones de abajo.",
-                inline=False
-            )
-            embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")
-            embed.set_footer(text="Sistema de Tickets • Dragons")
-            embed.timestamp = datetime.datetime.utcnow()
-            
-            # Crear vista con botones dinámicos
-            view = TicketPanelView(self.botones_config)
-            
-            await canal.send(embed=embed, view=view)
-            
-            await interaction.response.send_message(
-                f"✅ **Configuración completada**\n"
-                f"Panel de tickets creado en {canal.mention} con {len(self.botones_config)} botones.",
-                ephemeral=True
-            )
-            
-            # Desactivar todos los botones de configuración
-            for item in self.children:
-                item.disabled = True
-            
-            await interaction.message.edit(view=self)
-            
-        except Exception as e:
-            await interaction.response.send_message(
-                f"❌ Error al crear el panel: {e}",
-                ephemeral=True
-            )
-
-
-# ==============================
-# COMANDO /TICKETS (CONFIGURACIÓN COMPLETA)
-# ==============================
-@bot.tree.command(name="tickets", description="🎫 Configura el sistema de tickets completo")
+@bot.tree.command(name="tickets", description="🎫 Configura y crea el sistema de tickets completo")
 @app_commands.describe(
-    categoria="Categoría donde se crearán los canales de tickets",
+    categoria="Categoría donde se crearán los tickets",
     canal_logs="Canal donde se registrarán los logs",
-    rol_soporte="Rol que podrá ver y gestionar tickets",
-    titulo="Título del embed del panel",
-    descripcion="Descripción del embed (usa **negrita**, *cursiva*, etc.)",
+    rol_soporte="Rol que podrá ver los tickets",
+    canal_panel="Canal donde se enviará el panel",
+    titulo="Título del panel",
+    descripcion="Descripción del panel",
     color="Color del embed (hex, ej: 4169e1)",
-    canal_panel="Canal donde se enviará el panel de tickets",
     cantidad_botones="Cantidad de botones (1-7)"
 )
 @app_commands.checks.has_permissions(administrator=True)
-async def tickets_config(
+async def tickets_todo(
     interaction: discord.Interaction,
     categoria: discord.CategoryChannel,
     canal_logs: discord.TextChannel,
     rol_soporte: discord.Role,
-    titulo: str,
-    descripcion: str,
-    color: str,
     canal_panel: discord.TextChannel,
-    cantidad_botones: int
+    titulo: str = "🎫 Sistema de Tickets",
+    descripcion: str = "Selecciona el tipo de ayuda que necesitas",
+    color: str = "4169e1",
+    cantidad_botones: int = 1
 ):
-    # Validar cantidad de botones
+    # Validaciones
     if cantidad_botones < 1 or cantidad_botones > 7:
-        await interaction.response.send_message(
-            "❌ La cantidad de botones debe estar entre 1 y 7.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("❌ La cantidad debe estar entre 1 y 7.", ephemeral=True)
         return
     
-    # Validar color
     color_limpio = color.lstrip('#')
     if len(color_limpio) != 6 or not all(c in '0123456789abcdefABCDEF' for c in color_limpio):
-        await interaction.response.send_message(
-            "❌ Color inválido. Usa formato hexadecimal (ej: 4169e1 o #4169e1)",
-            ephemeral=True
-        )
+        await interaction.response.send_message("❌ Color inválido. Usa formato hex (ej: 4169e1)", ephemeral=True)
         return
     
-    # Preparar datos de configuración
-    config_data = {
-        "categoria_id": categoria.id,
-        "canal_logs_id": canal_logs.id,
-        "rol_soporte_id": rol_soporte.id,
-        "titulo": titulo,
-        "descripcion": descripcion,
-        "color": color_limpio,
-        "canal_panel_id": canal_panel.id
-    }
+    guild_id = str(interaction.guild.id)
     
-    # Mostrar vista para configurar botones
-    view = ConfigurarBotonesView(cantidad_botones, config_data)
-    
-    embed = discord.Embed(
-        title=f"{EMOJI_TICKET} Configuración de Tickets",
-        description=(
-            f"**Categoría:** {categoria.mention}\n"
-            f"**Canal Logs:** {canal_logs.mention}\n"
-            f"**Rol Soporte:** {rol_soporte.mention}\n"
-            f"**Canal Panel:** {canal_panel.mention}\n"
-            f"**Botones a configurar:** {cantidad_botones}\n\n"
-            f"🔧 **Configura cada botón usando los botones de abajo**"
-        ),
-        color=discord.Color(int(color_limpio, 16))
-    )
-    
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    try:
+        # Guardar configuración base
+        supabase.table("ticket_config").upsert({
+            "guild_id": guild_id,
+            "categoria_id": str(categoria.id),
+            "canal_logs_id": str(canal_logs.id),
+            "rol_soporte_id": str(rol_soporte.id),
+            "titulo": titulo,
+            "descripcion": descripcion,
+            "color": color_limpio,
+            "canal_panel_id": str(canal_panel.id)
+        }).execute()
+        
+        # Eliminar botones antiguos
+        supabase.table("ticket_botones").delete().eq("guild_id", guild_id).execute()
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        # Configurar cada botón mediante mensajes
+        botones_config = []
+        
+        for i in range(1, cantidad_botones + 1):
+            embed_config = discord.Embed(
+                title=f"⚙️ Configurar Botón {i}/{cantidad_botones}",
+                description=(
+                    "Responde con el formato:\n"
+                    "```\n"
+                    "Nombre: Soporte Técnico\n"
+                    "Emoji: 🛠️\n"
+                    "Color: green\n"
+                    "Categoría: Soporte\n"
+                    "```\n"
+                    "**Colores disponibles:** green, red, blue, grey, blurple"
+                ),
+                color=discord.Color(int(color_limpio, 16))
+            )
+            
+            await interaction.followup.send(embed=embed_config, ephemeral=True)
+            
+            def check(m):
+                return m.author.id == interaction.user.id and m.channel.id == interaction.channel.id
+            
+            try:
+                msg = await bot.wait_for('message', timeout=60.0, check=check)
+                
+                # Parsear respuesta
+                lineas = msg.content.strip().split('\n')
+                config_boton = {}
+                
+                for linea in lineas:
+                    if ':' in linea:
+                        clave, valor = linea.split(':', 1)
+                        clave = clave.strip().lower()
+                        valor = valor.strip()
+                        
+                        if 'nombre' in clave:
+                            config_boton['nombre'] = valor
+                        elif 'emoji' in clave:
+                            config_boton['emoji'] = valor
+                        elif 'color' in clave:
+                            config_boton['color'] = valor.lower()
+                        elif 'categor' in clave:
+                            config_boton['categoria'] = valor
+                
+                # Validar
+                if len(config_boton) < 4:
+                    await interaction.followup.send("❌ Faltan datos. Cancelando configuración.", ephemeral=True)
+                    return
+                
+                botones_config.append(config_boton)
+                
+                # Guardar en BD
+                supabase.table("ticket_botones").insert({
+                    "guild_id": guild_id,
+                    "nombre": config_boton['nombre'],
+                    "emoji": config_boton['emoji'],
+                    "color": config_boton['color'],
+                    "categoria": config_boton['categoria'],
+                    "orden": i
+                }).execute()
+                
+                await msg.delete()
+                await interaction.followup.send(f"✅ Botón {i} configurado: {config_boton['nombre']}", ephemeral=True)
+                
+            except asyncio.TimeoutError:
+                await interaction.followup.send("⏱️ Tiempo agotado. Cancelando configuración.", ephemeral=True)
+                return
+        
+        # Crear el panel
+        embed_panel = discord.Embed(
+            title=titulo,
+            description=descripcion,
+            color=discord.Color(int(color_limpio, 16))
+        )
+        embed_panel.add_field(
+            name=f"{EMOJI_FIRE} ¿Necesitas ayuda?",
+            value="Selecciona el tipo de ticket usando los botones de abajo.",
+            inline=False
+        )
+        embed_panel.set_thumbnail(url="https://cdn.discordapp.com/emojis/1432855339732177067.webp")
+        embed_panel.set_footer(text="Sistema de Tickets • Dragons")
+        embed_panel.timestamp = datetime.datetime.utcnow()
+        
+        # Crear vista con botones
+        view = TicketPanelView(botones_config)
+        
+        await canal_panel.send(embed=embed_panel, view=view)
+        
+        embed_final = discord.Embed(
+            title="✅ Sistema de Tickets Configurado",
+            description=(
+                f"**Categoría:** {categoria.mention}\n"
+                f"**Canal Logs:** {canal_logs.mention}\n"
+                f"**Rol Soporte:** {rol_soporte.mention}\n"
+                f"**Panel en:** {canal_panel.mention}\n"
+                f"**Botones:** {cantidad_botones}"
+            ),
+            color=discord.Color.green()
+        )
+        
+        await interaction.followup.send(embed=embed_final, ephemeral=True)
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
 # ==============================
-# VISTA DEL PANEL DE TICKETS (DINÁMICA)
+# VISTA DEL PANEL (DINÁMICA)
 # ==============================
 class TicketPanelView(discord.ui.View):
     def __init__(self, botones_config: list):
@@ -1159,7 +1063,7 @@ class TicketPanelView(discord.ui.View):
                 label=boton_data["nombre"],
                 style=colores_map.get(boton_data["color"], discord.ButtonStyle.green),
                 emoji=boton_data["emoji"],
-                custom_id=f"create_ticket_{idx}"
+                custom_id=f"create_ticket_{idx}_{boton_data['categoria']}"
             )
             button.callback = self.crear_callback_ticket(boton_data)
             self.add_item(button)
@@ -1170,9 +1074,7 @@ class TicketPanelView(discord.ui.View):
             user_id = str(interaction.user.id)
             
             try:
-                from __main__ import supabase
-                
-                # Verificar si ya tiene un ticket abierto
+                # Verificar ticket existente
                 existing = supabase.table("tickets").select("*").eq("guild_id", guild_id).eq("user_id", user_id).eq("estado", "abierto").execute()
                 
                 if existing.data:
@@ -1182,7 +1084,7 @@ class TicketPanelView(discord.ui.View):
                     )
                     return
                 
-                # Obtener configuración
+                # Obtener config
                 config = supabase.table("ticket_config").select("*").eq("guild_id", guild_id).execute()
                 
                 if not config.data:
@@ -1218,15 +1120,15 @@ class TicketPanelView(discord.ui.View):
                     "estado": "abierto"
                 }).execute()
                 
-                # Embed en el ticket
+                # Embed del ticket
                 embed = discord.Embed(
                     title=f"{boton_data['emoji']} {boton_data['categoria']} - Ticket #{ticket_num}",
-                    description=f"Hola {interaction.user.mention}, bienvenido a tu ticket.\n\n{EMOJI_FIRE} El equipo de soporte te atenderá pronto.",
+                    description=f"Hola {interaction.user.mention}, bienvenido a tu ticket.\n\n{EMOJI_FIRE} El equipo te atenderá pronto.",
                     color=discord.Color(int(cfg["color"], 16))
                 )
                 embed.add_field(
                     name=f"{EMOJI_NOTES} Instrucciones",
-                    value="• Explica tu situación con detalle\n• Sé paciente\n• Usa los botones para gestionar el ticket",
+                    value="• Explica tu problema con detalle\n• Sé paciente\n• Usa el botón para cerrar",
                     inline=False
                 )
                 embed.timestamp = datetime.datetime.utcnow()
@@ -1259,10 +1161,8 @@ class TicketControls(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
     
-    @discord.ui.button(label="Cerrar", style=discord.ButtonStyle.red, emoji="❌", custom_id="close_ticket_btn")
+    @discord.ui.button(label="Cerrar Ticket", style=discord.ButtonStyle.red, emoji="❌", custom_id="close_ticket_final")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from __main__ import supabase
-        
         canal_id = str(interaction.channel.id)
         
         try:
@@ -1284,8 +1184,7 @@ class TicketControls(discord.ui.View):
             
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
-
-
+            
 # ==============================
 # MINI SERVIDOR FLASK PARA RENDER
 # ==============================
