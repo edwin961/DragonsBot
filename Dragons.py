@@ -881,6 +881,97 @@ async def help_command(interaction: discord.Interaction):
 
 
 # ==============================
+# COMANDO /CREAR-DESPEDIDA
+# ==============================
+@bot.tree.command(name="crear-despedida", description="Crea una despedida personalizada para este servidor.")
+@app_commands.describe(
+    canal="Canal donde se enviará la despedida.",
+    encabezado="Título del mensaje.",
+    texto="Texto del mensaje (usa {usuario} para mencionar al usuario que se fue).",
+    gif="URL del GIF o imagen.",
+    color="Color del embed en formato hexadecimal (ejemplo: #4169e1 o 4169e1)"
+)
+async def crear_despedida(interaction: discord.Interaction, canal: discord.TextChannel, encabezado: str, texto: str, gif: str, color: str = "#ff0000"):
+    guild_id = str(interaction.guild.id)
+
+    # Limpiar el color (remover # si existe y validar)
+    color_limpio = color.lstrip('#')
+    
+    # Validar que sea un color hexadecimal válido
+    if len(color_limpio) != 6 or not all(c in '0123456789abcdefABCDEF' for c in color_limpio):
+        await interaction.response.send_message(
+            "❌ **Color inválido.** Usa un formato hexadecimal válido.\n"
+            "**Ejemplos:** `#4169e1`, `4169e1`, `#ff0000`, `00ff00`",
+            ephemeral=True
+        )
+        return
+
+    try:
+        # Convertir hex a color de Discord
+        color_int = int(color_limpio, 16)
+        color_embed = discord.Color(color_int)
+
+        supabase.table("despedidas").upsert({
+            "guild_id": guild_id,
+            "canal_id": str(canal.id),
+            "encabezado": encabezado,
+            "texto": texto,
+            "gif": gif,
+            "color": color_limpio
+        }).execute()
+
+        embed = discord.Embed(
+            title=f"{EMOJI_DRAGON} **[ DV ] Dragons Despedida Configurada**",
+            description=f"**Canal:** {canal.mention}\n**Encabezado:** {encabezado}\n**Texto:** {texto}\n**Color:** `#{color_limpio}`\n**GIF:** [Ver imagen]({gif})",
+            color=color_embed
+        )
+        embed.set_image(url=gif)
+        embed.set_footer(text="Sistema de Despedida • Dragons")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error al guardar la configuración: {e}", ephemeral=True)
+
+
+# ==============================
+# EVENTO DE SALIDA DE MIEMBRO
+# ==============================
+@bot.event
+async def on_member_remove(member):
+    """Enviar despedida cuando un usuario sale del servidor"""
+    try:
+        # Buscar configuración de despedida
+        guild_id = str(member.guild.id)
+        data = supabase.table("despedidas").select("*").eq("guild_id", guild_id).execute()
+
+        if data.data:
+            config = data.data[0]
+            canal = member.guild.get_channel(int(config["canal_id"]))
+            if canal:
+                # Convertir color hex a Discord Color
+                color_embed = discord.Color(int(config["color"], 16))
+                
+                embed = discord.Embed(
+                    title=config["encabezado"],
+                    description=config["texto"].replace("{usuario}", member.name),
+                    color=color_embed
+                )
+                embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+                embed.set_image(url=config["gif"])
+                embed.set_footer(text="🐲 Dragons | Hasta pronto")
+                embed.timestamp = datetime.datetime.utcnow()
+                
+                await canal.send(embed=embed)
+
+    except Exception as e:
+        print(f"❌ Error en on_member_remove: {e}")
+
+
+# ==============================
+# EMOJI ADICIONAL PARA DESPEDIDAS
+# ==============================
+EMOJI_GOODBYE = "👋"
+# ==============================
 # MINI SERVIDOR FLASK PARA RENDER
 # ==============================
 app = Flask("")
